@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a1a" />
+  <meta name="description" content="Mythic Fossils — A turn-based battle game." />
+  <title>Mythic Fossils</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a1a; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+    #root { min-height: 100vh; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    if (!window.storage) {
+      window.storage = {
+        async get(key) { const v = localStorage.getItem('mf:'+key); return v !== null ? {key, value: v, shared: false} : null; },
+        async set(key, value) { localStorage.setItem('mf:'+key, value); return {key, value, shared: false}; },
+        async delete(key) { localStorage.removeItem('mf:'+key); return {key, deleted: true, shared: false}; },
+        async list(prefix) { const keys=[]; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(k.startsWith('mf:'+(prefix||''))) keys.push(k.replace('mf:',''));} return {keys, prefix, shared: false}; },
+      };
+    }
+  </script>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const ELEMENTS = {
+  FIRE: { name: "Fire", color: "#e74c3c", icon: "🔥", strong: "EARTH", weak: "WATER" },
+  WATER: { name: "Water", color: "#3498db", icon: "💧", strong: "FIRE", weak: "WIND" },
+  WIND: { name: "Wind", color: "#2ecc71", icon: "🌪️", strong: "WATER", weak: "EARTH" },
+  EARTH: { name: "Earth", color: "#e67e22", icon: "🪨", strong: "WIND", weak: "FIRE" },
+  SHADOW: { name: "Shadow", color: "#8e44ad", icon: "🌑", strong: "LIGHT", weak: "LIGHT" },
+  LIGHT: { name: "Light", color: "#f1c40f", icon: "✨", strong: "SHADOW", weak: "SHADOW" },
+};
+
+const ROTATE_COST = 15;
+const PROTECT_COST = 20;
+const PZ_DURATION = 2;
+const MAX_FP = 150;
+
+const MONSTERS = {
+  // ═══ DRAKE LINE (Fire) — Lizard → Dragon ═══
+  pyroclawl: { id: "pyroclawl", name: "Pyroclawl", element: "FIRE", tier: "common", species: "Drake", emoji: "🦎", desc: "A blazing lizard with molten claws", baseHP: 120, baseAtk: 38, baseDef: 22, baseAcc: 90, baseSpd: 30, fpGen: 8,
+    skills: [{ name: "Flame Slash", power: 45, fp: 30, accuracy: 95, element: "FIRE", target: "single", effect: null, desc: "Burning claws" }, { name: "Ember Burst", power: 35, fp: 20, accuracy: 85, element: "FIRE", target: "all", effect: "burn", desc: "Embers burn all foes" }, { name: "Heat Shield", power: 0, fp: 30, accuracy: 100, element: "FIRE", target: "self", effect: "defUp", desc: "Boosts DEF" }],
+    support: { type: "atkBoost", value: 15, desc: "ATK +15%" }, partnerQuote: "Pyroclawl flexes its molten claws. A bond forged in fire." },
+  emberwyrm: { id: "emberwyrm", name: "Emberwyrm", element: "FIRE", tier: "rare", species: "Drake", emoji: "🐲", desc: "A serpentine wyrm wreathed in living flame", baseHP: 160, baseAtk: 46, baseDef: 28, baseAcc: 88, baseSpd: 34, fpGen: 10,
+    skills: [{ name: "Serpent Blaze", power: 58, fp: 34, accuracy: 92, element: "FIRE", target: "single", effect: "burn", desc: "Burning coil strike" }, { name: "Wildfire", power: 45, fp: 32, accuracy: 82, element: "FIRE", target: "all", effect: null, desc: "Spreads uncontrolled fire" }, { name: "War Cry", power: 0, fp: 35, accuracy: 100, element: "FIRE", target: "ally", effect: "atkUp", desc: "Boosts an ally's ATK" }],
+    support: { type: "atkBoost", value: 20, desc: "ATK +20%" } },
+  mythdrake: { id: "mythdrake", name: "Mythdrake", element: "FIRE", tier: "mythical", species: "Drake", emoji: "🐉", desc: "An ancient dragon of living flame", baseHP: 200, baseAtk: 50, baseDef: 35, baseAcc: 88, baseSpd: 32, fpGen: 12,
+    skills: [{ name: "Inferno Breath", power: 70, fp: 45, accuracy: 82, element: "FIRE", target: "all", effect: null, desc: "Engulfs all in dragonfire" }, { name: "Magma Claw", power: 60, fp: 35, accuracy: 92, element: "FIRE", target: "single", effect: null, desc: "Claws of liquid rock" }, { name: "Dragon Rage", power: 0, fp: 55, accuracy: 100, element: "FIRE", target: "self", effect: "atkUp", desc: "Berserker fury" }, { name: "Cataclysm", power: 90, fp: 65, accuracy: 75, element: "FIRE", target: "single", effect: null, desc: "Apocalyptic flames" }],
+    support: { type: "atkBoost", value: 25, desc: "ATK +25%" } },
+
+  // ═══ LEVIATHAN LINE (Water) — Croc → Serpent → Whale ═══
+  tidescale: { id: "tidescale", name: "Tidescale", element: "WATER", tier: "common", species: "Leviathan", emoji: "🐊", desc: "An armored aquatic predator", baseHP: 140, baseAtk: 30, baseDef: 32, baseAcc: 85, baseSpd: 22, fpGen: 10,
+    skills: [{ name: "Aqua Fang", power: 50, fp: 32, accuracy: 90, element: "WATER", target: "single", effect: null, desc: "Pressurized bite" }, { name: "Tidal Wave", power: 40, fp: 40, accuracy: 80, element: "WATER", target: "all", effect: null, desc: "Crashes a wave" }, { name: "Shell Guard", power: 0, fp: 28, accuracy: 100, element: "WATER", target: "self", effect: "defUp", desc: "Hardens scales" }],
+    support: { type: "defBoost", value: 15, desc: "DEF +15%" }, partnerQuote: "Tidescale rumbles softly. This predator has chosen its partner." },
+  abysserpent: { id: "abysserpent", name: "Abysserpent", element: "WATER", tier: "rare", species: "Leviathan", emoji: "🐍", desc: "A deep-sea serpent that coils through crushing depths", baseHP: 170, baseAtk: 36, baseDef: 38, baseAcc: 84, baseSpd: 20, fpGen: 12,
+    skills: [{ name: "Depth Crush", power: 56, fp: 34, accuracy: 88, element: "WATER", target: "single", effect: null, desc: "Pressure crush" }, { name: "Whirlpool", power: 42, fp: 38, accuracy: 82, element: "WATER", target: "all", effect: "spdDown", desc: "Trapping vortex" }, { name: "Brine Armor", power: 0, fp: 30, accuracy: 100, element: "WATER", target: "self", effect: "defUp", desc: "Salt-crusted defense" }],
+    support: { type: "defBoost", value: 20, desc: "DEF +20%" } },
+  leviathos: { id: "leviathos", name: "Leviathos", element: "WATER", tier: "mythical", species: "Leviathan", emoji: "🐋", desc: "The abyssal leviathan of endless depths", baseHP: 240, baseAtk: 42, baseDef: 42, baseAcc: 82, baseSpd: 18, fpGen: 14,
+    skills: [{ name: "Abyssal Crush", power: 65, fp: 38, accuracy: 88, element: "WATER", target: "single", effect: null, desc: "Crushes under pressure" }, { name: "Maelstrom", power: 55, fp: 48, accuracy: 78, element: "WATER", target: "all", effect: "spdDown", desc: "Whirlpool trap" }, { name: "Deep Heal", power: 0, fp: 65, accuracy: 100, element: "WATER", target: "team", effect: "heal", desc: "Ocean mist heals" }, { name: "Leviathan's Wrath", power: 85, fp: 60, accuracy: 72, element: "WATER", target: "single", effect: null, desc: "Full fury of the deep" }],
+    support: { type: "defBoost", value: 25, desc: "DEF +25%" } },
+
+  // ═══ RAPTOR LINE (Wind) — Bird → Hawk → Phoenix ═══
+  galecrest: { id: "galecrest", name: "Galecrest", element: "WIND", tier: "common", species: "Raptor", emoji: "🦅", desc: "A swift raptor riding wind currents", baseHP: 100, baseAtk: 35, baseDef: 18, baseAcc: 95, baseSpd: 42, fpGen: 12,
+    skills: [{ name: "Razor Wind", power: 42, fp: 25, accuracy: 100, element: "WIND", target: "single", effect: null, desc: "Cutting air blades" }, { name: "Cyclone Dive", power: 55, fp: 38, accuracy: 85, element: "WIND", target: "single", effect: "spdDown", desc: "Tornado dive" }, { name: "Tailwind", power: 0, fp: 28, accuracy: 100, element: "WIND", target: "self", effect: "spdUp", desc: "Boosts speed" }],
+    support: { type: "spdBoost", value: 20, desc: "SPD +20%" }, partnerQuote: "Galecrest lands on your shoulder. You feel the sky calling." },
+  stormtalon: { id: "stormtalon", name: "Stormtalon", element: "WIND", tier: "rare", species: "Raptor", emoji: "🦜", desc: "A thunderhawk that rides lightning-charged gales", baseHP: 115, baseAtk: 42, baseDef: 22, baseAcc: 94, baseSpd: 46, fpGen: 14,
+    skills: [{ name: "Gale Strike", power: 52, fp: 30, accuracy: 96, element: "WIND", target: "single", effect: null, desc: "Lightning-fast slash" }, { name: "Tempest Fury", power: 48, fp: 42, accuracy: 82, element: "WIND", target: "all", effect: "accDown", desc: "Blinds with storm debris" }, { name: "Updraft", power: 0, fp: 32, accuracy: 100, element: "WIND", target: "self", effect: "spdUp", desc: "Soars higher" }],
+    support: { type: "spdBoost", value: 25, desc: "SPD +25%" } },
+  zephyros: { id: "zephyros", name: "Zephyros", element: "WIND", tier: "mythical", species: "Raptor", emoji: "🕊️", desc: "The divine wind phoenix, reborn from every storm", baseHP: 150, baseAtk: 48, baseDef: 26, baseAcc: 96, baseSpd: 52, fpGen: 16,
+    skills: [{ name: "Hurricane Slash", power: 68, fp: 40, accuracy: 94, element: "WIND", target: "single", effect: null, desc: "Cuts through anything" }, { name: "Stormbreak", power: 58, fp: 50, accuracy: 80, element: "WIND", target: "all", effect: "spdDown", desc: "Shattering gale" }, { name: "Rebirth Gust", power: 0, fp: 55, accuracy: 100, element: "WIND", target: "team", effect: "heal", desc: "Healing winds" }, { name: "Sonic Boom", power: 82, fp: 58, accuracy: 78, element: "WIND", target: "single", effect: null, desc: "Breaks the sound barrier" }],
+    support: { type: "spdBoost", value: 30, desc: "SPD +30%" } },
+
+  // ═══ GOLEM LINE (Earth) — Turtle → Rhino → Titan ═══
+  terravault: { id: "terravault", name: "Terravault", element: "EARTH", tier: "common", species: "Golem", emoji: "🐢", desc: "A walking fortress with a stone shell", baseHP: 180, baseAtk: 25, baseDef: 40, baseAcc: 80, baseSpd: 12, fpGen: 14,
+    skills: [{ name: "Boulder Slam", power: 55, fp: 35, accuracy: 85, element: "EARTH", target: "single", effect: null, desc: "Hurls a boulder" }, { name: "Quake Stomp", power: 38, fp: 30, accuracy: 90, element: "EARTH", target: "all", effect: null, desc: "Shakes the earth" }, { name: "Fortify", power: 0, fp: 25, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Reinforces armor" }],
+    support: { type: "hpRegen", value: 6, desc: "Heal AZ +6/turn" }, partnerQuote: "Terravault lets out a deep purr. It has found someone worth protecting." },
+  ironhorn: { id: "ironhorn", name: "Ironhorn", element: "EARTH", tier: "rare", species: "Golem", emoji: "🦏", desc: "A charging beast with an ore-laced horn", baseHP: 200, baseAtk: 34, baseDef: 44, baseAcc: 78, baseSpd: 16, fpGen: 13,
+    skills: [{ name: "Horn Drill", power: 62, fp: 36, accuracy: 82, element: "EARTH", target: "single", effect: null, desc: "Piercing charge" }, { name: "Earthshatter", power: 46, fp: 34, accuracy: 85, element: "EARTH", target: "all", effect: "defUp", desc: "Cracks then hardens" }, { name: "Iron Wall", power: 0, fp: 28, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Impenetrable stance" }],
+    support: { type: "hpRegen", value: 10, desc: "Heal AZ +10/turn" } },
+  colossaur: { id: "colossaur", name: "Colossaur", element: "EARTH", tier: "mythical", species: "Golem", emoji: "🦕", desc: "A mountain-sized titan of living stone", baseHP: 280, baseAtk: 38, baseDef: 50, baseAcc: 76, baseSpd: 10, fpGen: 16,
+    skills: [{ name: "Titan Crush", power: 75, fp: 42, accuracy: 80, element: "EARTH", target: "single", effect: null, desc: "Mountain-weight blow" }, { name: "Continental Shift", power: 55, fp: 50, accuracy: 75, element: "EARTH", target: "all", effect: "spdDown", desc: "Reshapes the land" }, { name: "Fossil Barrier", power: 0, fp: 40, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Ancient stone wall" }, { name: "Extinction Slam", power: 95, fp: 68, accuracy: 68, element: "EARTH", target: "single", effect: null, desc: "World-ending impact" }],
+    support: { type: "hpRegen", value: 14, desc: "Heal AZ +14/turn" } },
+
+  // ═══ PHANTOM LINE (Shadow) — Bat → Wolf → Wraith ═══
+  noxwing: { id: "noxwing", name: "Noxwing", element: "SHADOW", tier: "common", species: "Phantom", emoji: "🦇", desc: "A phantom bat that drains life force", baseHP: 110, baseAtk: 40, baseDef: 20, baseAcc: 92, baseSpd: 38, fpGen: 15,
+    skills: [{ name: "Shadow Bite", power: 48, fp: 28, accuracy: 95, element: "SHADOW", target: "single", effect: "drain", desc: "Drains HP" }, { name: "Void Screech", power: 35, fp: 32, accuracy: 85, element: "SHADOW", target: "all", effect: "atkDown", desc: "Lowers all ATK" }, { name: "Eclipse Veil", power: 0, fp: 40, accuracy: 100, element: "SHADOW", target: "self", effect: "evasion", desc: "Shadow vanish" }],
+    support: { type: "fpBoost", value: 5, desc: "Team FP +5/turn" }, partnerQuote: "Noxwing wraps its wings around you. In darkness, trust is everything." },
+  grimfang: { id: "grimfang", name: "Grimfang", element: "SHADOW", tier: "rare", species: "Phantom", emoji: "🐺", desc: "A spectral wolf that hunts in eternal night", baseHP: 135, baseAtk: 45, baseDef: 24, baseAcc: 90, baseSpd: 40, fpGen: 13,
+    skills: [{ name: "Dread Fang", power: 55, fp: 32, accuracy: 93, element: "SHADOW", target: "single", effect: "drain", desc: "Fear-infused bite" }, { name: "Howling Dark", power: 42, fp: 36, accuracy: 84, element: "SHADOW", target: "all", effect: "accDown", desc: "Blinds with darkness" }, { name: "Shadow Step", power: 0, fp: 35, accuracy: 100, element: "SHADOW", target: "self", effect: "spdUp", desc: "Phases through shadow" }],
+    support: { type: "fpBoost", value: 8, desc: "Team FP +8/turn" } },
+  voidreaper: { id: "voidreaper", name: "Voidreaper", element: "SHADOW", tier: "mythical", species: "Phantom", emoji: "👻", desc: "An ancient wraith that unravels reality itself", baseHP: 165, baseAtk: 52, baseDef: 28, baseAcc: 90, baseSpd: 44, fpGen: 15,
+    skills: [{ name: "Soul Rend", power: 72, fp: 40, accuracy: 90, element: "SHADOW", target: "single", effect: "drain", desc: "Tears the soul" }, { name: "Oblivion Wave", power: 55, fp: 48, accuracy: 82, element: "SHADOW", target: "all", effect: "atkDown", desc: "Erases will to fight" }, { name: "Phantom Form", power: 0, fp: 45, accuracy: 100, element: "SHADOW", target: "self", effect: "evasion", desc: "Becomes intangible" }, { name: "Annihilate", power: 88, fp: 62, accuracy: 74, element: "SHADOW", target: "single", effect: null, desc: "Erases from existence" }],
+    support: { type: "fpBoost", value: 12, desc: "Team FP +12/turn" } },
+
+  // ═══ CELESTIAL LINE (Light) — Lion → Stag → Angel ═══
+  solmane: { id: "solmane", name: "Solmane", element: "LIGHT", tier: "common", species: "Celestial", emoji: "🦁", desc: "A radiant lion with a golden mane", baseHP: 130, baseAtk: 42, baseDef: 28, baseAcc: 88, baseSpd: 28, fpGen: 10,
+    skills: [{ name: "Holy Roar", power: 50, fp: 30, accuracy: 90, element: "LIGHT", target: "single", effect: null, desc: "Sonic light beam" }, { name: "Radiance", power: 0, fp: 55, accuracy: 100, element: "LIGHT", target: "team", effect: "heal", desc: "Heals entire team" }, { name: "Guardian Aura", power: 0, fp: 35, accuracy: 100, element: "LIGHT", target: "ally", effect: "shield", desc: "Shields an ally (-30% dmg)" }],
+    support: { type: "hpRegen", value: 8, desc: "Heal AZ +8/turn" }, partnerQuote: "Solmane roars gently, its mane radiating warmth. A guardian of light." },
+  lumihart: { id: "lumihart", name: "Lumihart", element: "LIGHT", tier: "rare", species: "Celestial", emoji: "🦌", desc: "A crystalline stag whose antlers channel starlight", baseHP: 145, baseAtk: 44, baseDef: 32, baseAcc: 90, baseSpd: 32, fpGen: 11,
+    skills: [{ name: "Star Lance", power: 58, fp: 34, accuracy: 92, element: "LIGHT", target: "single", effect: null, desc: "Piercing starlight" }, { name: "Aurora Heal", power: 0, fp: 50, accuracy: 100, element: "LIGHT", target: "team", effect: "heal", desc: "Northern lights mend" }, { name: "Prism Shield", power: 0, fp: 32, accuracy: 100, element: "LIGHT", target: "self", effect: "defUp", desc: "Refracting barrier" }],
+    support: { type: "hpRegen", value: 10, desc: "Heal AZ +10/turn" } },
+  seraphon: { id: "seraphon", name: "Seraphon", element: "LIGHT", tier: "mythical", species: "Celestial", emoji: "👼", desc: "A six-winged seraph of blinding divine light", baseHP: 190, baseAtk: 48, baseDef: 36, baseAcc: 92, baseSpd: 34, fpGen: 12,
+    skills: [{ name: "Divine Smite", power: 72, fp: 42, accuracy: 88, element: "LIGHT", target: "single", effect: null, desc: "Holy judgment strike" }, { name: "Celestial Rain", power: 52, fp: 46, accuracy: 84, element: "LIGHT", target: "all", effect: null, desc: "Light rains from above" }, { name: "Miracle", power: 0, fp: 60, accuracy: 100, element: "LIGHT", target: "team", effect: "heal", desc: "Heavenly restoration" }, { name: "Supernova", power: 85, fp: 62, accuracy: 76, element: "LIGHT", target: "single", effect: null, desc: "Miniature star explosion" }],
+    support: { type: "hpRegen", value: 14, desc: "Heal AZ +14/turn" } },
+
+  // ═══ INSECT LINE (Multi-element commons) — Bug → Beetle → Mantis ═══
+  chitinskut: { id: "chitinskut", name: "Chitinskut", element: "EARTH", tier: "common", species: "Insect", emoji: "🐛", desc: "A burrowing grub with razor mandibles", baseHP: 105, baseAtk: 28, baseDef: 35, baseAcc: 82, baseSpd: 18, fpGen: 16,
+    skills: [{ name: "Mandible Snap", power: 40, fp: 22, accuracy: 92, element: "EARTH", target: "single", effect: null, desc: "Crushing jaws" }, { name: "Burrow", power: 0, fp: 22, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Digs underground" }, { name: "Swarm Spit", power: 30, fp: 18, accuracy: 88, element: "EARTH", target: "all", effect: null, desc: "Acid spray" }],
+    support: { type: "fpBoost", value: 6, desc: "Team FP +6/turn" }, partnerQuote: "Chitinskut clicks its mandibles happily. Small but mighty." },
+  scarabalm: { id: "scarabalm", name: "Scarabalm", element: "FIRE", tier: "common", species: "Insect", emoji: "🪲", desc: "A volcanic beetle with a glowing carapace", baseHP: 115, baseAtk: 32, baseDef: 30, baseAcc: 86, baseSpd: 24, fpGen: 11,
+    skills: [{ name: "Scorch Ram", power: 46, fp: 28, accuracy: 90, element: "FIRE", target: "single", effect: null, desc: "Burning charge" }, { name: "Lava Shell", power: 0, fp: 26, accuracy: 100, element: "FIRE", target: "self", effect: "defUp", desc: "Molten armor" }, { name: "Heat Swarm", power: 32, fp: 22, accuracy: 84, element: "FIRE", target: "all", effect: null, desc: "Burning beetle swarm" }],
+    support: { type: "atkBoost", value: 12, desc: "ATK +12%" }, partnerQuote: "Scarabalm's shell glows warm. A loyal protector." },
+  frostmoth: { id: "frostmoth", name: "Frostmoth", element: "WIND", tier: "common", species: "Insect", emoji: "🦋", desc: "A delicate moth that trails frozen dust", baseHP: 90, baseAtk: 34, baseDef: 16, baseAcc: 94, baseSpd: 40, fpGen: 13,
+    skills: [{ name: "Frost Dust", power: 38, fp: 22, accuracy: 96, element: "WIND", target: "single", effect: "spdDown", desc: "Chilling powder" }, { name: "Blizzard Wings", power: 44, fp: 34, accuracy: 84, element: "WIND", target: "all", effect: null, desc: "Frozen gale" }, { name: "Shimmer Scale", power: 0, fp: 26, accuracy: 100, element: "WIND", target: "self", effect: "spdUp", desc: "Glittering evasion" }],
+    support: { type: "spdBoost", value: 15, desc: "SPD +15%" }, partnerQuote: "Frostmoth alights on your hand, wings shimmering. Grace in fragility." },
+
+  // ═══ DRAKE VARIANTS (Shadow & Earth drakes) ═══
+  umbraclaw: { id: "umbraclaw", name: "Umbraclaw", element: "SHADOW", tier: "common", species: "Drake", emoji: "🦎", desc: "A drake born in volcanic caves, cloaked in smoke and shadow", baseHP: 115, baseAtk: 36, baseDef: 24, baseAcc: 91, baseSpd: 32, fpGen: 9,
+    skills: [{ name: "Shade Rend", power: 44, fp: 28, accuracy: 94, element: "SHADOW", target: "single", effect: "drain", desc: "Shadowy claw drains life" }, { name: "Smoke Screen", power: 28, fp: 18, accuracy: 88, element: "SHADOW", target: "all", effect: "accDown", desc: "Blinding smoke" }, { name: "Dark Scales", power: 0, fp: 28, accuracy: 100, element: "SHADOW", target: "self", effect: "defUp", desc: "Shadow-hardened hide" }],
+    support: { type: "atkBoost", value: 14, desc: "ATK +14%" }, partnerQuote: "Umbraclaw emerges from the shadows, its eyes gleaming with loyalty." },
+  terradrake: { id: "terradrake", name: "Terradrake", element: "EARTH", tier: "rare", species: "Drake", emoji: "🐲", desc: "A wingless drake that burrows through solid stone", baseHP: 175, baseAtk: 40, baseDef: 36, baseAcc: 84, baseSpd: 22, fpGen: 11,
+    skills: [{ name: "Stone Fang", power: 56, fp: 32, accuracy: 90, element: "EARTH", target: "single", effect: null, desc: "Petrifying bite" }, { name: "Tremor Tail", power: 42, fp: 30, accuracy: 86, element: "EARTH", target: "all", effect: "spdDown", desc: "Seismic tail sweep" }, { name: "Mineral Hide", power: 0, fp: 30, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Crystalline armor" }],
+    support: { type: "defBoost", value: 18, desc: "DEF +18%" } },
+
+  // ═══ LEVIATHAN VARIANTS (Wind & Shadow leviathans) ═══
+  mistfin: { id: "mistfin", name: "Mistfin", element: "WIND", tier: "common", species: "Leviathan", emoji: "🐟", desc: "A flying fish that rides ocean gales above the waves", baseHP: 110, baseAtk: 32, baseDef: 24, baseAcc: 92, baseSpd: 36, fpGen: 12,
+    skills: [{ name: "Gale Splash", power: 42, fp: 26, accuracy: 94, element: "WIND", target: "single", effect: null, desc: "Launches from the surf" }, { name: "Storm Spray", power: 34, fp: 28, accuracy: 86, element: "WIND", target: "all", effect: "accDown", desc: "Blinding sea mist" }, { name: "Slipstream", power: 0, fp: 24, accuracy: 100, element: "WIND", target: "self", effect: "spdUp", desc: "Rides the jet stream" }],
+    support: { type: "spdBoost", value: 14, desc: "SPD +14%" }, partnerQuote: "Mistfin leaps joyfully beside you. The sea and sky are one." },
+  depthshade: { id: "depthshade", name: "Depthshade", element: "SHADOW", tier: "rare", species: "Leviathan", emoji: "🦑", desc: "An abyssal squid that blinds prey with ink darker than night", baseHP: 150, baseAtk: 40, baseDef: 30, baseAcc: 86, baseSpd: 28, fpGen: 14,
+    skills: [{ name: "Ink Lash", power: 52, fp: 30, accuracy: 92, element: "SHADOW", target: "single", effect: "accDown", desc: "Blinding tentacle" }, { name: "Abyss Ink", power: 40, fp: 34, accuracy: 84, element: "SHADOW", target: "all", effect: "accDown", desc: "Total darkness" }, { name: "Camouflage", power: 0, fp: 32, accuracy: 100, element: "SHADOW", target: "self", effect: "evasion", desc: "Invisible in the dark" }],
+    support: { type: "fpBoost", value: 7, desc: "Team FP +7/turn" } },
+
+  // ═══ RAPTOR VARIANTS (Fire & Light raptors) ═══
+  cindertalon: { id: "cindertalon", name: "Cindertalon", element: "FIRE", tier: "common", species: "Raptor", emoji: "🐓", desc: "A fiery rooster-hawk with ember-tipped feathers", baseHP: 95, baseAtk: 38, baseDef: 16, baseAcc: 93, baseSpd: 38, fpGen: 10,
+    skills: [{ name: "Blaze Peck", power: 44, fp: 24, accuracy: 96, element: "FIRE", target: "single", effect: null, desc: "Searing beak strike" }, { name: "Ash Flurry", power: 36, fp: 22, accuracy: 86, element: "FIRE", target: "all", effect: null, desc: "Cloud of burning ash" }, { name: "Firebolt Dash", power: 0, fp: 26, accuracy: 100, element: "FIRE", target: "self", effect: "spdUp", desc: "Ignition burst speed" }],
+    support: { type: "atkBoost", value: 14, desc: "ATK +14%" }, partnerQuote: "Cindertalon crows at dawn. Every day is a battle, and it's ready." },
+  haloswift: { id: "haloswift", name: "Haloswift", element: "LIGHT", tier: "rare", species: "Raptor", emoji: "🦢", desc: "A radiant swan-hawk whose wings scatter prismatic light", baseHP: 120, baseAtk: 40, baseDef: 26, baseAcc: 94, baseSpd: 44, fpGen: 12,
+    skills: [{ name: "Prism Dive", power: 54, fp: 32, accuracy: 94, element: "LIGHT", target: "single", effect: null, desc: "Rainbow-trailing strike" }, { name: "Flash Burst", power: 42, fp: 36, accuracy: 88, element: "LIGHT", target: "all", effect: "accDown", desc: "Blinding light pulse" }, { name: "Grace", power: 0, fp: 34, accuracy: 100, element: "LIGHT", target: "self", effect: "spdUp", desc: "Ethereal agility" }],
+    support: { type: "hpRegen", value: 7, desc: "Heal AZ +7/turn" } },
+
+  // ═══ GOLEM VARIANTS (Water & Fire golems) ═══
+  coralguard: { id: "coralguard", name: "Coralguard", element: "WATER", tier: "common", species: "Golem", emoji: "🦀", desc: "A crab-golem armored in living reef coral", baseHP: 160, baseAtk: 26, baseDef: 38, baseAcc: 82, baseSpd: 14, fpGen: 13,
+    skills: [{ name: "Coral Crush", power: 48, fp: 30, accuracy: 88, element: "WATER", target: "single", effect: null, desc: "Reef-armored pinch" }, { name: "Tide Pool", power: 0, fp: 26, accuracy: 100, element: "WATER", target: "self", effect: "defUp", desc: "Regenerating coral" }, { name: "Surf Slam", power: 36, fp: 26, accuracy: 84, element: "WATER", target: "all", effect: null, desc: "Crashing surf" }],
+    support: { type: "defBoost", value: 14, desc: "DEF +14%" }, partnerQuote: "Coralguard clicks its claws protectively. An ocean fortress walks beside you." },
+  magmacore: { id: "magmacore", name: "Magmacore", element: "FIRE", tier: "rare", species: "Golem", emoji: "🌋", desc: "A volcanic golem with a molten heart beating inside stone", baseHP: 190, baseAtk: 38, baseDef: 40, baseAcc: 80, baseSpd: 14, fpGen: 12,
+    skills: [{ name: "Eruption Fist", power: 60, fp: 36, accuracy: 84, element: "FIRE", target: "single", effect: null, desc: "Lava-cored punch" }, { name: "Magma Surge", power: 44, fp: 38, accuracy: 78, element: "FIRE", target: "all", effect: null, desc: "Volcanic eruption" }, { name: "Basalt Shell", power: 0, fp: 30, accuracy: 100, element: "FIRE", target: "self", effect: "defUp", desc: "Cooled lava armor" }],
+    support: { type: "atkBoost", value: 16, desc: "ATK +16%" } },
+
+  // ═══ PHANTOM VARIANTS (Wind & Water phantoms) ═══
+  mistwalker: { id: "mistwalker", name: "Mistwalker", element: "WIND", tier: "common", species: "Phantom", emoji: "🌫️", desc: "A fog spirit that drifts silently through moors", baseHP: 100, baseAtk: 36, baseDef: 18, baseAcc: 90, baseSpd: 42, fpGen: 14,
+    skills: [{ name: "Fog Lash", power: 40, fp: 24, accuracy: 94, element: "WIND", target: "single", effect: "accDown", desc: "Disorienting strike" }, { name: "Mist Veil", power: 0, fp: 28, accuracy: 100, element: "WIND", target: "self", effect: "evasion", desc: "Dissolves into mist" }, { name: "Gale Haunt", power: 34, fp: 22, accuracy: 86, element: "WIND", target: "all", effect: null, desc: "Chilling ghost wind" }],
+    support: { type: "spdBoost", value: 16, desc: "SPD +16%" }, partnerQuote: "Mistwalker swirls around you. Where it goes, silence follows." },
+  drownspirit: { id: "drownspirit", name: "Drownspirit", element: "WATER", tier: "rare", species: "Phantom", emoji: "🫧", desc: "The ghost of a drowned beast, trailing spectral bubbles", baseHP: 140, baseAtk: 42, baseDef: 26, baseAcc: 88, baseSpd: 34, fpGen: 14,
+    skills: [{ name: "Undertow Pull", power: 54, fp: 32, accuracy: 90, element: "WATER", target: "single", effect: "spdDown", desc: "Drags under the current" }, { name: "Phantom Tide", power: 40, fp: 34, accuracy: 84, element: "WATER", target: "all", effect: "drain", desc: "Draining ghost wave" }, { name: "Spectral Flow", power: 0, fp: 32, accuracy: 100, element: "WATER", target: "self", effect: "evasion", desc: "Becomes water itself" }],
+    support: { type: "fpBoost", value: 7, desc: "Team FP +7/turn" } },
+
+  // ═══ CELESTIAL VARIANTS (Earth & Wind celestials) ═══
+  petraglyph: { id: "petraglyph", name: "Petraglyph", element: "EARTH", tier: "common", species: "Celestial", emoji: "🗿", desc: "A sacred stone idol animated by ancient prayer", baseHP: 150, baseAtk: 30, baseDef: 36, baseAcc: 84, baseSpd: 16, fpGen: 12,
+    skills: [{ name: "Sacred Stone", power: 48, fp: 30, accuracy: 88, element: "EARTH", target: "single", effect: null, desc: "Holy boulder strike" }, { name: "Prayer Wall", power: 0, fp: 28, accuracy: 100, element: "EARTH", target: "self", effect: "defUp", desc: "Divine barrier" }, { name: "Earth Hymn", power: 0, fp: 42, accuracy: 100, element: "LIGHT", target: "team", effect: "heal", desc: "Ancient healing chant" }],
+    support: { type: "hpRegen", value: 9, desc: "Heal AZ +9/turn" }, partnerQuote: "Petraglyph hums with an ancient resonance. Its devotion is eternal." },
+  skylark: { id: "skylark", name: "Skylark", element: "WIND", tier: "rare", species: "Celestial", emoji: "🐦", desc: "A songbird blessed by heaven, whose melody heals wounds", baseHP: 125, baseAtk: 38, baseDef: 24, baseAcc: 92, baseSpd: 40, fpGen: 13,
+    skills: [{ name: "Hymn Strike", power: 50, fp: 30, accuracy: 94, element: "WIND", target: "single", effect: null, desc: "Music-charged dive" }, { name: "Chorus Heal", power: 0, fp: 48, accuracy: 100, element: "LIGHT", target: "team", effect: "heal", desc: "Heavenly choir mends" }, { name: "Windsong", power: 0, fp: 30, accuracy: 100, element: "WIND", target: "self", effect: "spdUp", desc: "Harmonic acceleration" }],
+    support: { type: "hpRegen", value: 9, desc: "Heal AZ +9/turn" } },
+
+  // ═══ INSECT LINE completion (Rare & Mythical) ═══
+  venomantis: { id: "venomantis", name: "Venomantis", element: "SHADOW", tier: "rare", species: "Insect", emoji: "🦗", desc: "A mantis assassin dripping with paralytic venom", baseHP: 120, baseAtk: 44, baseDef: 22, baseAcc: 93, baseSpd: 36, fpGen: 12,
+    skills: [{ name: "Venom Scythe", power: 56, fp: 32, accuracy: 94, element: "SHADOW", target: "single", effect: "poison", desc: "Toxic blade arms" }, { name: "Plague Cloud", power: 38, fp: 30, accuracy: 86, element: "SHADOW", target: "all", effect: "poison", desc: "Noxious spore burst" }, { name: "Molt", power: 0, fp: 30, accuracy: 100, element: "SHADOW", target: "self", effect: "spdUp", desc: "Sheds skin for speed" }],
+    support: { type: "fpBoost", value: 7, desc: "Team FP +7/turn" } },
+  emperoptera: { id: "emperoptera", name: "Emperoptera", element: "LIGHT", tier: "mythical", species: "Insect", emoji: "🪰", desc: "An emperor dragonfly with wings of crystallized sunlight", baseHP: 140, baseAtk: 46, baseDef: 28, baseAcc: 94, baseSpd: 48, fpGen: 18,
+    skills: [{ name: "Solar Lance", power: 66, fp: 38, accuracy: 94, element: "LIGHT", target: "single", effect: null, desc: "Focused sunbeam stinger" }, { name: "Prismatic Swarm", power: 50, fp: 46, accuracy: 84, element: "LIGHT", target: "all", effect: "accDown", desc: "Dazzling light swarm" }, { name: "Metamorphosis", power: 0, fp: 45, accuracy: 100, element: "LIGHT", target: "self", effect: "atkUp", desc: "Transcendent evolution" }, { name: "Sun Eater", power: 80, fp: 58, accuracy: 78, element: "LIGHT", target: "single", effect: null, desc: "Devours the sun's power" }],
+    support: { type: "fpBoost", value: 10, desc: "Team FP +10/turn" } },
+};
+
+// ═══ SPECIES SYNERGY: Full trio (common+rare+mythical) unlocks ultimate + passive ═══
+const SPECIES_SYNERGY = {
+  Drake: {
+    name: "Infernal Convergence", emoji: "🔥🐉🔥", element: "FIRE",
+    ultimate: { name: "Primordial Firestorm", power: 110, fp: 120, element: "FIRE", target: "all", accuracy: 100, effect: null, desc: "All three drakes channel an ancient firestorm that engulfs everything" },
+    passive: { desc: "Drake Bond: All team ATK +20%, FP gen +5", atkBonus: 0.2, fpGenBonus: 5 },
+  },
+  Leviathan: {
+    name: "Abyssal Convergence", emoji: "💧🐋💧", element: "WATER",
+    ultimate: { name: "Tectonic Tsunami", power: 100, fp: 120, element: "WATER", target: "all", accuracy: 100, effect: "spdDown", desc: "The ocean itself rises to obliterate all foes" },
+    passive: { desc: "Leviathan Bond: All team DEF +20%, HP regen +8", defBonus: 0.2, hpRegenBonus: 8 },
+  },
+  Raptor: {
+    name: "Storm Convergence", emoji: "🌪️🕊️🌪️", element: "WIND",
+    ultimate: { name: "Eternal Tempest", power: 95, fp: 110, element: "WIND", target: "all", accuracy: 100, effect: "accDown", desc: "A storm that has raged since the dawn of time descends" },
+    passive: { desc: "Raptor Bond: All team SPD +25%, ACC +10%", spdBonus: 0.25, accBonus: 0.1 },
+  },
+  Golem: {
+    name: "Tectonic Convergence", emoji: "🪨🦕🪨", element: "EARTH",
+    ultimate: { name: "World Shatter", power: 120, fp: 130, element: "EARTH", target: "all", accuracy: 100, effect: null, desc: "The continental plates crack and the world trembles" },
+    passive: { desc: "Golem Bond: All team DEF +25%, take 15% less damage", defBonus: 0.25, dmgReduction: 0.15 },
+  },
+  Phantom: {
+    name: "Void Convergence", emoji: "🌑👻🌑", element: "SHADOW",
+    ultimate: { name: "Reality Collapse", power: 105, fp: 115, element: "SHADOW", target: "all", accuracy: 100, effect: "atkDown", desc: "The boundary between existence and void shatters" },
+    passive: { desc: "Phantom Bond: All team drain +15%, FP gen +8", drainBonus: 0.15, fpGenBonus: 8 },
+  },
+  Celestial: {
+    name: "Divine Convergence", emoji: "✨👼✨", element: "LIGHT",
+    ultimate: { name: "Genesis Light", power: 90, fp: 110, element: "LIGHT", target: "all", accuracy: 100, effect: "heal", desc: "The first light of creation shines again — damages foes and heals allies" },
+    passive: { desc: "Celestial Bond: Team heals +30% effective, HP regen +10", healBonus: 0.3, hpRegenBonus: 10 },
+  },
+  Insect: {
+    name: "Swarm Convergence", emoji: "🐛🦗🪰", element: "SHADOW",
+    ultimate: { name: "Plague of Ages", power: 85, fp: 100, element: "SHADOW", target: "all", accuracy: 100, effect: "atkDown", desc: "An ancient swarm darkens the sky and devours all strength" },
+    passive: { desc: "Swarm Bond: Team FP gen +10, all debuffs last +1 turn", fpGenBonus: 10 },
+  },
+};
+
+// Detect if a team has full species synergy (all 3 tiers of one species)
+function detectSynergy(team) {
+  const speciesTiers = {};
+  team.forEach(m => {
+    if (!m.alive || !m.species) return;
+    if (!speciesTiers[m.species]) speciesTiers[m.species] = new Set();
+    speciesTiers[m.species].add(m.tier);
+  });
+  for (const [species, tiers] of Object.entries(speciesTiers)) {
+    if (tiers.has("common") && tiers.has("rare") && tiers.has("mythical")) {
+      return { species, synergy: SPECIES_SYNERGY[species] };
+    }
+  }
+  return null;
+}
+
+const COMMON_PARTNERS = Object.values(MONSTERS).filter(m => m.tier === "common");
+const ALL_MONSTERS_LIST = Object.values(MONSTERS);
+
+// ═══ OPPONENT RANDOMIZATION SYSTEM ═══
+
+const TRAINER_FIRST = ["Kai", "Marina", "Vex", "Astra", "Rook", "Zara", "Flint", "Coral", "Shade", "Blaze", "Frost", "Thorn", "Luna", "Orion", "Cinder", "Dusk", "Ivy", "Rex", "Nova", "Slate"];
+const TRAINER_TITLE = ["Aspiring Digger", "Tide Caller", "Eclipse Adept", "Fossil Scout", "Ember Knight", "Storm Chaser", "Stone Warden", "Shadow Walker", "Light Bringer", "Mythic Seeker", "Beast Tamer", "Ruin Explorer", "Elemental Sage", "Bone Collector", "Rift Wanderer", "Crystal Guard"];
+const TRAINER_PREFIX_EASY = ["Rookie", "Junior", "Trainee", "Novice"];
+const TRAINER_PREFIX_MID = ["Ranger", "Hunter", "Veteran", "Captain"];
+const TRAINER_PREFIX_HARD = ["Master", "Champion", "Warlord", "Sovereign", "Archon"];
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function pickN(arr, n) { const s = [...arr]; const r = []; for (let i = 0; i < n && s.length; i++) { const idx = Math.floor(Math.random() * s.length); r.push(s.splice(idx, 1)[0]); } return r; }
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+// Generate a random enemy team based on round difficulty
+function generateOpponent(round, totalRounds) {
+  const progress = round / totalRounds; // 0..1
+  // Trainer name gets harder-sounding as rounds progress
+  const prefixes = progress < 0.35 ? TRAINER_PREFIX_EASY : progress < 0.7 ? TRAINER_PREFIX_MID : TRAINER_PREFIX_HARD;
+  const trainer = `${pick(prefixes)} ${pick(TRAINER_FIRST)}`;
+  const title = pick(TRAINER_TITLE);
+
+  // Team size: 2 early, 2-3 mid, 3 late
+  const teamSize = progress < 0.3 ? 2 : progress < 0.6 ? randInt(2, 3) : 3;
+
+  // Tier pool: early = commons only, mid = commons + rares, late = can include mythicals
+  let pool;
+  if (progress < 0.3) pool = ALL_MONSTERS_LIST.filter(m => m.tier === "common");
+  else if (progress < 0.7) pool = ALL_MONSTERS_LIST.filter(m => m.tier === "common" || m.tier === "rare");
+  else pool = ALL_MONSTERS_LIST;
+
+  // Pick random monsters ensuring variety (no exact duplicates)
+  const team = pickN(pool, teamSize);
+
+  // Level scaling: base level increases per round with some variance
+  const baseLvl = 2 + round * 2;
+  const monsters = team.map((m, i) => ({
+    ...m,
+    level: Math.max(1, baseLvl + randInt(-1, 1) - i), // AZ slightly higher
+  }));
+
+  // Round labels
+  const roundNames = ["Round 1", "Round 2", "Quarterfinal", "Semifinal", "Grand Final"];
+  const roundLabels = ["R1", "R2", "QF", "SF", "FINAL"];
+  const nameIdx = Math.min(round, roundNames.length - 1);
+
+  return {
+    round: round + 1,
+    name: roundNames[nameIdx] || `Round ${round + 1}`,
+    label: roundLabels[nameIdx] || `R${round + 1}`,
+    trainer,
+    title,
+    monsters,
+  };
+}
+
+// Generate a full tournament bracket (4 rounds, randomized each time)
+function generateTournamentBracket() {
+  return [0, 1, 2, 3].map(i => generateOpponent(i, 4));
+}
+
+// Generate a freeplay opponent (scales infinitely)
+function generateFreeplayOpponent(battleNum) {
+  const progress = Math.min(1, battleNum / 8); // caps at "max difficulty" by battle 8
+  const prefixes = progress < 0.3 ? TRAINER_PREFIX_EASY : progress < 0.6 ? TRAINER_PREFIX_MID : TRAINER_PREFIX_HARD;
+  const trainer = `${pick(prefixes)} ${pick(TRAINER_FIRST)}`;
+  const title = pick(TRAINER_TITLE);
+  const teamSize = progress < 0.2 ? 2 : progress < 0.5 ? randInt(2, 3) : 3;
+
+  let pool;
+  if (progress < 0.25) pool = ALL_MONSTERS_LIST.filter(m => m.tier === "common");
+  else if (progress < 0.6) pool = ALL_MONSTERS_LIST.filter(m => m.tier === "common" || m.tier === "rare");
+  else pool = ALL_MONSTERS_LIST;
+
+  const team = pickN(pool, teamSize);
+  const baseLvl = 3 + battleNum * 1.5;
+  const monsters = team.map((m, i) => ({ ...m, level: Math.max(1, Math.floor(baseLvl + randInt(-1, 2) - i)) }));
+
+  return { round: battleNum + 1, name: `Battle ${battleNum + 1}`, label: `B${battleNum + 1}`, trainer, title, monsters };
+}
+
+// ═══ POSITIONING: Each monster has a `zone` field: "AZ" | "SZ" | "PZ"
+// PZ monsters have pzTurns countdown. When it hits 0, auto-return to SZ.
+// PZ monsters don't provide support, don't generate FP, can't be targeted.
+
+function calcStat(b, l) { return Math.floor(b * (1 + (l - 1) * 0.12)); }
+function initBattleMonster(t, l) { const hp = calcStat(t.baseHP, l); return { ...t, level: l, maxHP: hp, hp, atk: calcStat(t.baseAtk, l), def: calcStat(t.baseDef, l), acc: calcStat(t.baseAcc, l), spd: calcStat(t.baseSpd, l), buffs: {}, alive: true, zone: "SZ", pzTurns: 0 }; }
+function getElMult(a, d) { if (!a || !d) return 1; const e = ELEMENTS[a]; if (!e) return 1; if (e.strong === d) return 1.5; if (e.weak === d) return 0.7; return 1; }
+
+function getAZ(team) { return team.find(m => m.zone === "AZ" && m.alive); }
+function getSZ(team) { return team.filter(m => m.zone === "SZ" && m.alive); }
+function getPZ(team) { return team.filter(m => m.zone === "PZ" && m.alive); }
+
+function calcTeamFPGen(team) {
+  let gen = 10;
+  team.forEach(m => {
+    if (!m.alive) return;
+    if (m.zone === "SZ") { gen += m.fpGen; if (m.support?.type === "fpBoost") gen += m.support.value; }
+    else if (m.zone === "AZ") gen += Math.floor(m.fpGen * 0.3);
+  });
+  const syn = detectSynergy(team);
+  if (syn?.synergy?.passive?.fpGenBonus) gen += syn.synergy.passive.fpGenBonus;
+  return gen;
+}
+
+function getSupportMult(team, stat) {
+  let mult = 1;
+  team.forEach(m => { if (!m.alive || m.zone !== "SZ") return; if (stat === "atk" && m.support?.type === "atkBoost") mult += m.support.value / 100; if (stat === "def" && m.support?.type === "defBoost") mult += m.support.value / 100; if (stat === "spd" && m.support?.type === "spdBoost") mult += m.support.value / 100; if (stat === "acc" && m.support?.type === "accBoost") mult += m.support.value / 100; });
+  // Synergy passive bonuses
+  const syn = detectSynergy(team);
+  if (syn?.synergy?.passive) {
+    const p = syn.synergy.passive;
+    if (stat === "atk" && p.atkBonus) mult += p.atkBonus;
+    if (stat === "def" && p.defBonus) mult += p.defBonus;
+    if (stat === "spd" && p.spdBonus) mult += p.spdBonus;
+    if (stat === "acc" && p.accBonus) mult += p.accBonus;
+  }
+  return mult;
+}
+
+function applySupportHealing(team) {
+  const az = team.findIndex(m => m.zone === "AZ" && m.alive);
+  if (az === -1) return team;
+  let heal = 0;
+  team.forEach(m => { if (m.alive && m.zone === "SZ" && m.support?.type === "hpRegen") heal += m.support.value; });
+  // Synergy bonus
+  const syn = detectSynergy(team);
+  if (syn?.synergy?.passive?.hpRegenBonus) heal += syn.synergy.passive.hpRegenBonus;
+  if (heal <= 0) return team;
+  const nt = [...team]; nt[az] = { ...nt[az], hp: Math.min(nt[az].maxHP, nt[az].hp + heal) };
+  return nt;
+}
+
+// Tick PZ timers: decrement pzTurns, return to SZ when 0
+function tickPZ(team, logFn) {
+  return team.map(m => {
+    if (m.zone !== "PZ" || !m.alive) return m;
+    const remaining = m.pzTurns - 1;
+    if (remaining <= 0) { logFn(`${m.emoji} ${m.name} returns from Protection Zone!`, "info"); return { ...m, zone: "SZ", pzTurns: 0 }; }
+    return { ...m, pzTurns: remaining };
+  });
+}
+
+// Auto promote: if AZ is empty, promote first SZ
+function autoPromote(team, logFn) {
+  const azAlive = team.find(m => m.zone === "AZ" && m.alive);
+  if (azAlive) return team;
+  const firstSZ = team.findIndex(m => m.zone === "SZ" && m.alive);
+  if (firstSZ === -1) return team;
+  const nt = [...team]; nt[firstSZ] = { ...nt[firstSZ], zone: "AZ" };
+  const oldAZ = nt.findIndex(m => m.zone === "AZ" && !m.alive);
+  if (oldAZ !== -1 && oldAZ !== firstSZ) nt[oldAZ] = { ...nt[oldAZ], zone: "SZ" };
+  logFn(`${nt[firstSZ].name} promoted to Attack Zone!`, "info");
+  return nt;
+}
+
+// ═══ BUFF & STATUS DURATION SYSTEM ═══
+// Buffs stored as: { atkUp: 2, defUp: 1, burn: 2, poison: 3, stun: 1, shield: 2, ... }
+// Value = remaining turns. 0 or missing = inactive.
+
+function applyBuff(monster, key, turns) {
+  return { ...monster, buffs: { ...monster.buffs, [key]: Math.max(monster.buffs[key] || 0, turns) } };
+}
+
+// Tick all buff/debuff durations down by 1, remove expired. Also apply DoT.
+function tickBuffs(team, logFn) {
+  return team.map(m => {
+    if (!m.alive) return m;
+    let nm = { ...m, buffs: { ...m.buffs } };
+    // Burn DoT: 8% max HP per turn
+    if (nm.buffs.burn > 0) {
+      const dot = Math.max(1, Math.floor(nm.maxHP * 0.08));
+      nm.hp = Math.max(1, nm.hp - dot);
+      logFn(`${nm.emoji} ${nm.name} burned for ${dot}! 🔥`, "damage");
+    }
+    // Poison DoT: 6% max HP per turn
+    if (nm.buffs.poison > 0) {
+      const dot = Math.max(1, Math.floor(nm.maxHP * 0.06));
+      nm.hp = Math.max(1, nm.hp - dot);
+      logFn(`${nm.emoji} ${nm.name} poisoned for ${dot}! 🟢`, "damage");
+    }
+    // Stun: logged during action phase, not here
+    // Decrement all durations
+    const newBuffs = {};
+    for (const [k, v] of Object.entries(nm.buffs)) {
+      if (k === "healCount") { newBuffs[k] = v; continue; }
+      const nv = (typeof v === "number" ? v : 0) - 1;
+      if (nv > 0) { newBuffs[k] = nv; }
+      else if (nv <= 0 && v > 0) { logFn(`${nm.name}'s ${formatBuffName(k)} wore off`, "info"); }
+    }
+    nm.buffs = newBuffs;
+    return nm;
+  });
+}
+
+function formatBuffName(k) {
+  const names = { atkUp: "ATK boost", defUp: "DEF boost", spdUp: "SPD boost", accUp: "ACC boost",
+    atkDown: "ATK drop", defDown: "DEF drop", spdDown: "SPD drop", accDown: "ACC drop",
+    evasion: "evasion", burn: "burn", poison: "poison", stun: "stun", shield: "shield" };
+  return names[k] || k;
+}
+
+function getBuffIcon(k) {
+  const icons = { atkUp: "⚔️↑", defUp: "🛡️↑", spdUp: "💨↑", accUp: "🎯↑",
+    atkDown: "⚔️↓", defDown: "🛡️↓", spdDown: "💨↓", accDown: "🎯↓",
+    evasion: "👻", burn: "🔥", poison: "🟢", stun: "⚡", shield: "🔰" };
+  return icons[k] || "?";
+}
+
+function isStunned(monster) { return (monster.buffs.stun || 0) > 0; }
+function hasShield(monster) { return (monster.buffs.shield || 0) > 0; }
+
+function calcHitChance(attacker, skill, defender, atkTeam, defTeam) {
+  const accBuff = 1 + ((attacker.buffs.accUp || 0) > 0 ? 0.15 : 0) - ((attacker.buffs.accDown || 0) > 0 ? 0.15 : 0);
+  const spdBuff = 1 + ((defender.buffs.spdUp || 0) > 0 ? 0.2 : 0) - ((defender.buffs.spdDown || 0) > 0 ? 0.15 : 0);
+  const evasionBonus = (defender.buffs.evasion || 0) > 0 ? 0.6 : 1;
+  const accStat = attacker.acc * getSupportMult(atkTeam, "acc") * accBuff;
+  const spdStat = defender.spd * getSupportMult(defTeam, "spd") * spdBuff;
+  const ratio = Math.min(1.5, accStat / Math.max(1, spdStat));
+  const hit = Math.min(100, Math.max(30, (skill.accuracy || 90) * ratio * evasionBonus));
+  return hit;
+}
+
+function calcDamage(atk, skill, def, atkTeam, defTeam) {
+  const am = getSupportMult(atkTeam, "atk"); const dm = getSupportMult(defTeam, "def");
+  const as = atk.atk * am * (1 + ((atk.buffs.atkUp || 0) > 0 ? 0.3 : 0) - ((atk.buffs.atkDown || 0) > 0 ? 0.2 : 0));
+  const ds = def.def * dm * (1 + ((def.buffs.defUp || 0) > 0 ? 0.3 : 0));
+  const el = getElMult(skill.element, def.element);
+  let dmg = Math.max(1, Math.floor(((skill.power * (as / ds) * 0.5) + 5) * el * (0.9 + Math.random() * 0.2)));
+  // Shield reduces damage by 30%
+  if (hasShield(def)) dmg = Math.max(1, Math.floor(dmg * 0.7));
+  return dmg;
+}
+
+// ═══ UI COMPONENTS ═══
+
+function HPBar({ current, max }) { const p = Math.max(0, (current / max) * 100); const c = p > 50 ? "#2ecc71" : p > 25 ? "#f39c12" : "#e74c3c"; return <div style={{ width: "100%", height: 8, background: "rgba(0,0,0,0.4)", borderRadius: 4, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}><div style={{ width: `${p}%`, height: "100%", background: c, transition: "width 0.5s", borderRadius: 4 }} /></div>; }
+
+function TeamFPBar({ current, max, gen }) { const p = Math.max(0, Math.min(100, (current / max) * 100)); return <div style={{ padding: "5px 10px", background: "rgba(0,0,0,0.35)", borderRadius: 8, border: "1px solid rgba(93,173,226,0.2)" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}><span style={{ fontSize: 9, color: "#5dade2", fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 1 }}>⚡ TEAM FP</span><span style={{ fontSize: 9, color: "#aaa", fontFamily: "monospace" }}>{current}/{max} <span style={{ color: "#2ecc71", fontSize: 7 }}>+{gen}/turn</span></span></div><div style={{ width: "100%", height: 8, background: "rgba(0,0,0,0.5)", borderRadius: 4, overflow: "hidden" }}><div style={{ width: `${p}%`, height: "100%", background: "linear-gradient(90deg, #2980b9, #5dade2)", transition: "width 0.5s", borderRadius: 4 }} /></div></div>; }
+
+function ZoneSlot({ monster, zone, onClick, shaking, highlight }) {
+  const zoneConf = {
+    AZ: { label: "⚔️ ATTACK", color: "#e74c3c", w: 130, h: 155 },
+    SZ: { label: "🛡️ SUPPORT", color: "#3498db", w: 105, h: 122 },
+    PZ: { label: "💤 PROTECT", color: "#9b59b6", w: 100, h: 115 },
+  };
+  const z = zoneConf[zone] || zoneConf.SZ;
+  if (!monster || !monster.alive) {
+    return <div style={{ width: z.w, minHeight: z.h, background: "rgba(0,0,0,0.12)", borderRadius: 10, border: "2px dashed rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
+      <div style={{ fontSize: 6, color: z.color, letterSpacing: 1, fontFamily: "'Cinzel', serif", textTransform: "uppercase" }}>{z.label}</div>
+      <div style={{ color: "rgba(255,255,255,0.12)", fontSize: 10, fontFamily: "'Cinzel', serif" }}>{monster ? "💀 KO" : "—"}</div>
+    </div>;
+  }
+  const el = ELEMENTS[monster.element];
+  const tierC = { common: "#95a5a6", rare: "#9b59b6", mythical: "#f1c40f" };
+  const isPZ = zone === "PZ";
+  return (
+    <div onClick={onClick} style={{
+      width: z.w, minHeight: z.h, background: zone === "AZ" ? `linear-gradient(135deg, ${el.color}22, ${el.color}44)` : isPZ ? "linear-gradient(135deg, rgba(155,89,182,0.15), rgba(155,89,182,0.25))" : "linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.45))",
+      borderRadius: 10, border: `2px solid ${zone === "AZ" ? el.color : isPZ ? "#9b59b688" : "rgba(255,255,255,0.08)"}`,
+      padding: "7px 5px", cursor: onClick ? "pointer" : "default", transition: "all 0.3s",
+      boxShadow: zone === "AZ" ? `0 0 12px ${el.color}33` : "none", position: "relative", display: "flex", flexDirection: "column", gap: 2,
+      animation: shaking ? "shake 0.4s ease" : "none", opacity: isPZ ? 0.7 : 1,
+      outline: highlight ? "2px dashed #f1c40f88" : "none", outlineOffset: highlight ? 2 : 0,
+    }}>
+      <div style={{ position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)", background: z.color, color: "#fff", fontSize: 6, padding: "1px 6px", borderRadius: 5, fontFamily: "'Cinzel', serif", letterSpacing: 0.6, textTransform: "uppercase", whiteSpace: "nowrap" }}>{z.label}{isPZ ? ` (${monster.pzTurns})` : ""}</div>
+      <div style={{ position: "absolute", top: 2, right: 4, background: tierC[monster.tier], color: "#fff", fontSize: 5, padding: "1px 3px", borderRadius: 2, textTransform: "uppercase", fontFamily: "'Cinzel', serif" }}>{monster.tier}</div>
+      <div style={{ textAlign: "center", fontSize: zone === "AZ" ? 28 : 20, lineHeight: 1, marginTop: 5 }}>{monster.emoji}</div>
+      <div style={{ textAlign: "center", color: "#fff", fontSize: zone === "AZ" ? 9 : 7, fontFamily: "'Cinzel', serif", fontWeight: 700 }}>{monster.name}</div>
+      <div style={{ textAlign: "center", color: el.color, fontSize: 6, fontFamily: "'Cinzel', serif" }}>{el.icon} {monster.species ? `${monster.species} • ` : ""}Lv.{monster.level}</div>
+      <div style={{ padding: "0 2px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 6, color: "#ccc", marginBottom: 1, fontFamily: "monospace" }}><span>HP</span><span>{monster.hp}/{monster.maxHP}</span></div>
+        <HPBar current={monster.hp} max={monster.maxHP} />
+      </div>
+      {zone === "SZ" && <div style={{ fontSize: 6, color: "#aed6f1", textAlign: "center", fontStyle: "italic" }}>{monster.support?.desc} • ⚡+{monster.fpGen}</div>}
+      {zone === "AZ" && <div style={{ fontSize: 6, color: "#aaa", textAlign: "center", fontFamily: "monospace" }}>ATK:{monster.atk} DEF:{monster.def} ACC:{monster.acc} SPD:{monster.spd}</div>}
+      {monster.buffs && (() => { const active = Object.entries(monster.buffs).filter(([k, v]) => v > 0 && k !== "healCount"); return active.length > 0 ? <div style={{ display: "flex", gap: 2, justifyContent: "center", flexWrap: "wrap", marginTop: 1 }}>{active.map(([k, v]) => <span key={k} title={`${formatBuffName(k)} (${v}t)`} style={{ fontSize: 7, padding: "0 2px", background: k.includes("Down") || k === "burn" || k === "poison" || k === "stun" ? "rgba(231,76,60,0.25)" : "rgba(46,204,113,0.25)", borderRadius: 3, color: k.includes("Down") || k === "burn" || k === "poison" || k === "stun" ? "#e74c3c" : "#2ecc71" }}>{getBuffIcon(k)}{v}</span>)}</div> : null; })()}
+      {isPZ && <div style={{ fontSize: 7, color: "#c39bd3", textAlign: "center", fontWeight: 700 }}>💤 {monster.pzTurns} turn{monster.pzTurns > 1 ? "s" : ""} left</div>}
+    </div>
+  );
+}
+
+function BattleLog({ log }) { const ref = useRef(null); useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [log]); return <div ref={ref} style={{ height: 85, overflowY: "auto", background: "rgba(0,0,0,0.5)", borderRadius: 8, padding: "5px 8px", fontSize: 9, fontFamily: "'Courier Prime', monospace", color: "#ddd", border: "1px solid rgba(255,255,255,0.08)", scrollbarWidth: "thin" }}>{log.map((e, i) => <div key={i} style={{ marginBottom: 2, opacity: i === log.length - 1 ? 1 : 0.6, color: e.type === "damage" ? "#e74c3c" : e.type === "heal" ? "#2ecc71" : e.type === "buff" ? "#f1c40f" : e.type === "element" ? "#9b59b6" : e.type === "fp" ? "#5dade2" : "#ccc" }}>{e.text}</div>)}{log.length === 0 && <div style={{ color: "#666", fontStyle: "italic" }}>Battle begins...</div>}</div>; }
+
+function ElementChart({ onClose }) {
+  const els = Object.values(ELEMENTS);
+  const elKeys = Object.keys(ELEMENTS);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Cinzel', serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "linear-gradient(135deg, #12101a, #1a1028)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.1)", padding: 16, maxWidth: 380, width: "100%", color: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 900, letterSpacing: 2, background: "linear-gradient(90deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Element Chart</h3>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#aaa", padding: "3px 10px", fontSize: 10, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {/* Cycle diagram */}
+        <div style={{ textAlign: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 9, color: "#888", marginBottom: 6 }}>Main Cycle (→ beats)</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexWrap: "wrap" }}>
+            {["FIRE","EARTH","WIND","WATER"].map((k, i) => {
+              const el = ELEMENTS[k];
+              return <span key={k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 18, padding: "4px 8px", background: `${el.color}22`, borderRadius: 8, border: `1px solid ${el.color}44` }}>{el.icon}</span>
+                {i < 3 && <span style={{ color: "#2ecc71", fontSize: 12, fontWeight: 700 }}>→</span>}
+              </span>;
+            })}
+            <span style={{ color: "#2ecc71", fontSize: 12, fontWeight: 700 }}>→ 🔥</span>
+          </div>
+          <div style={{ fontSize: 8, color: "#666", marginTop: 4 }}>🔥→🪨→🌪️→💧→🔥</div>
+        </div>
+
+        <div style={{ textAlign: "center", marginBottom: 12, padding: "6px 10px", background: "rgba(155,89,182,0.1)", borderRadius: 8, border: "1px solid rgba(155,89,182,0.2)" }}>
+          <div style={{ fontSize: 9, color: "#888", marginBottom: 3 }}>Shadow ↔ Light (mutual weakness)</div>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 20, padding: "4px 8px", background: "rgba(142,68,173,0.2)", borderRadius: 8, border: "1px solid rgba(142,68,173,0.3)" }}>🌑</span>
+            <span style={{ color: "#e74c3c", fontSize: 14, fontWeight: 700 }}>⚡↔⚡</span>
+            <span style={{ fontSize: 20, padding: "4px 8px", background: "rgba(241,196,15,0.15)", borderRadius: 8, border: "1px solid rgba(241,196,15,0.25)" }}>✨</span>
+          </div>
+        </div>
+
+        {/* Full matchup table */}
+        <div style={{ fontSize: 8, color: "#888", marginBottom: 4, textAlign: "center" }}>Damage Multipliers</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8 }}>
+            <thead>
+              <tr>
+                <th style={{ padding: "3px 4px", borderBottom: "1px solid rgba(255,255,255,0.1)", color: "#888", textAlign: "left" }}>ATK ↓ / DEF →</th>
+                {els.map(el => <th key={el.name} style={{ padding: "3px 4px", borderBottom: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}><span style={{ fontSize: 12 }}>{el.icon}</span></th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {elKeys.map(atkKey => {
+                const atk = ELEMENTS[atkKey];
+                return (
+                  <tr key={atkKey}>
+                    <td style={{ padding: "3px 4px", borderBottom: "1px solid rgba(255,255,255,0.04)", color: atk.color, fontWeight: 700 }}>{atk.icon} {atk.name}</td>
+                    {elKeys.map(defKey => {
+                      const mult = atk.strong === defKey ? 1.5 : atk.weak === defKey ? 0.7 : 1;
+                      const bg = mult > 1 ? "rgba(46,204,113,0.2)" : mult < 1 ? "rgba(231,76,60,0.2)" : "transparent";
+                      const color = mult > 1 ? "#2ecc71" : mult < 1 ? "#e74c3c" : "#555";
+                      const label = mult > 1 ? "1.5×" : mult < 1 ? "0.7×" : "1×";
+                      return <td key={defKey} style={{ padding: "3px 4px", borderBottom: "1px solid rgba(255,255,255,0.04)", textAlign: "center", background: bg, color, fontWeight: mult !== 1 ? 700 : 400, fontFamily: "monospace" }}>{label}</td>;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 7, color: "#666", textAlign: "center", lineHeight: 1.5 }}>
+          <span style={{ color: "#2ecc71" }}>1.5×</span> = Super Effective (50% more damage) · <span style={{ color: "#e74c3c" }}>0.7×</span> = Resisted (30% less damage)
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TournamentBracket({ currentRound, results, bracket = [] }) {
+  return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, padding: "5px 0", overflowX: "auto" }}>
+    {bracket.map((r, i) => { const w = results[i] === "win", l = results[i] === "lose", c = i === currentRound, lk = i > currentRound; const b = w ? "#2ecc71" : l ? "#e74c3c" : c ? "#f1c40f" : "rgba(255,255,255,0.08)"; return <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}><div style={{ width: 52, padding: "4px 2px", borderRadius: 7, background: w ? "rgba(46,204,113,0.2)" : l ? "rgba(231,76,60,0.2)" : c ? "rgba(241,196,15,0.25)" : "rgba(255,255,255,0.03)", border: `2px solid ${b}`, textAlign: "center", opacity: lk ? 0.3 : 1 }}><div style={{ fontSize: 5, color: b, fontFamily: "'Cinzel', serif", letterSpacing: 1, textTransform: "uppercase" }}>{r.label}</div><div style={{ fontSize: 11 }}>{w ? "✅" : l ? "❌" : c ? "⚔️" : "🔒"}</div><div style={{ fontSize: 5, color: "#ccc", fontFamily: "'Cinzel', serif", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.trainer.split(" ").pop()}</div></div>{i < bracket.length - 1 && <div style={{ width: 8, height: 2, background: w ? "#2ecc71" : "rgba(255,255,255,0.1)", borderRadius: 1 }} />}</div>; })}
+    <div style={{ width: 8, height: 2, background: results[bracket.length - 1] === "win" ? "#f1c40f" : "rgba(255,255,255,0.1)", borderRadius: 1 }} />
+    <div style={{ width: 52, padding: "4px 2px", borderRadius: 7, background: results[bracket.length - 1] === "win" ? "linear-gradient(135deg, rgba(241,196,15,0.3), rgba(230,126,34,0.3))" : "rgba(255,255,255,0.02)", border: `2px solid ${results[bracket.length - 1] === "win" ? "#f1c40f" : "rgba(255,255,255,0.05)"}`, textAlign: "center", opacity: results[bracket.length - 1] === "win" ? 1 : 0.3 }}><div style={{ fontSize: 5, color: "#f1c40f", fontFamily: "'Cinzel', serif" }}>PRIZE</div><div style={{ fontSize: 11 }}>🏆</div></div>
+  </div>;
+}
+
+function PartnerRewardScreen({ onChoose }) {
+  const [sel, setSel] = useState(null); const [conf, setConf] = useState(false); const [rev, setRev] = useState(0);
+  useEffect(() => { const t = []; for (let i = 0; i < 10; i++) t.push(setTimeout(() => setRev(i + 1), 300 + i * 250)); return () => t.forEach(clearTimeout); }, []);
+  if (conf && sel) { const el = ELEMENTS[sel.element]; return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: 30, textAlign: "center" }}><style>{`@keyframes partnerGlow{0%,100%{box-shadow:0 0 30px ${el.color}44}50%{box-shadow:0 0 50px ${el.color}66}}@keyframes heartbeat{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}`}</style><div style={{ fontSize: 13, color: "#f1c40f88", letterSpacing: 4, textTransform: "uppercase", marginBottom: 14, animation: "fadeUp 0.8s ease" }}>A New Bond Is Formed</div><div style={{ width: 130, height: 130, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: `radial-gradient(circle, ${el.color}33, transparent 70%)`, animation: "partnerGlow 3s ease-in-out infinite, heartbeat 2s ease-in-out infinite", marginBottom: 16 }}><span style={{ fontSize: 66 }}>{sel.emoji}</span></div><h2 style={{ fontSize: 24, fontWeight: 900, letterSpacing: 3, marginBottom: 4, background: `linear-gradient(135deg, ${el.color}, #f1c40f)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{sel.name}</h2><div style={{ fontSize: 10, color: "#aaa", marginBottom: 16, fontStyle: "italic", maxWidth: 300, lineHeight: 1.5 }}>"{sel.partnerQuote}"</div><button onClick={() => onChoose(sel)} style={{ background: `linear-gradient(135deg, ${el.color}, ${el.color}cc)`, color: "#fff", border: "none", padding: "12px 34px", borderRadius: 26, fontSize: 13, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>Begin Your Journey</button></div>; }
+  return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 40%, #2d1b4e 70%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: 20, textAlign: "center" }}><div style={{ fontSize: 42, marginBottom: 8 }}>🏆</div><h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: 3, marginBottom: 6, background: "linear-gradient(135deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Champion!</h2><p style={{ fontSize: 12, color: "#f1c40f", marginBottom: 20, letterSpacing: 2 }}>Choose your first partner</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginBottom: 20 }}>{COMMON_PARTNERS.map((m, i) => { const el = ELEMENTS[m.element]; const v = rev > i; const s = sel?.id === m.id; return <div key={m.id} onClick={() => v && setSel(m)} style={{ width: 120, padding: 10, borderRadius: 10, cursor: v ? "pointer" : "default", background: s ? `linear-gradient(135deg, ${el.color}33, ${el.color}55)` : "rgba(255,255,255,0.03)", border: `2px solid ${s ? el.color : "rgba(255,255,255,0.08)"}`, transition: "all 0.4s", opacity: v ? 1 : 0, transform: v ? "scale(1)" : "scale(0.7)", position: "relative" }}>{s && <div style={{ position: "absolute", top: -7, left: "50%", transform: "translateX(-50%)", background: el.color, color: "#fff", fontSize: 7, padding: "1px 6px", borderRadius: 5, fontFamily: "'Cinzel', serif" }}>CHOSEN</div>}<div style={{ fontSize: 32, marginBottom: 3 }}>{m.emoji}</div><div style={{ fontSize: 11, fontWeight: 700 }}>{m.name}</div><div style={{ fontSize: 7, color: el.color }}>{el.icon} {el.name}</div><div style={{ fontSize: 6, color: "#666", marginTop: 3, fontFamily: "monospace" }}>HP:{m.baseHP} ATK:{m.baseAtk}</div></div>; })}</div>{sel && <button onClick={() => setConf(true)} style={{ background: `linear-gradient(135deg, ${ELEMENTS[sel.element].color}, ${ELEMENTS[sel.element].color}cc)`, color: "#fff", border: "none", padding: "10px 28px", borderRadius: 22, fontSize: 12, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>Bond with {sel.name}</button>}</div>;
+}
+
+// ═══ MAIN GAME ═══
+function MythicFossils() {
+  const [screen, setScreen] = useState("title");
+  const [gameMode, setGameMode] = useState(null);
+  const [difficulty, setDifficulty] = useState(null);
+  const [playerTeam, setPlayerTeam] = useState([]);
+  const [enemyTeam, setEnemyTeam] = useState([]);
+  const [playerFP, setPlayerFP] = useState(50);
+  const [enemyFP, setEnemyFP] = useState(50);
+  const [battleLog, setBattleLog] = useState([]);
+  const [turn, setTurn] = useState("player");
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [selectingTarget, setSelectingTarget] = useState(false);
+  const [selectingRotate, setSelectingRotate] = useState(false);
+  const [selectingProtect, setSelectingProtect] = useState(false);
+  const [currentBattle, setCurrentBattle] = useState(0);
+  const [animating, setAnimating] = useState(false);
+  const [shakeId, setShakeId] = useState(null);
+  const [showChart, setShowChart] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialPage, setTutorialPage] = useState(0);
+  const [tutorialChecked, setTutorialChecked] = useState(false);
+  const [wins, setWins] = useState(0);
+  const [selectedRoster, setSelectedRoster] = useState([]);
+  const [filterElement, setFilterElement] = useState("all");
+  const [filterSpecies, setFilterSpecies] = useState("all");
+  const [filterTier, setFilterTier] = useState("all");
+  const [sortBy, setSortBy] = useState("species");
+  const [battleResult, setBattleResult] = useState(null);
+  const [tournamentResults, setTournamentResults] = useState({});
+  const [bracket, setBracket] = useState([]); // generated tournament bracket
+  const [currentOpponent, setCurrentOpponent] = useState(null); // current freeplay opponent
+  const [partner, setPartner] = useState(null);
+  const [turnNum, setTurnNum] = useState(1);
+  const [actionsThisTurn, setActionsThisTurn] = useState(0);
+  // Journey mode
+  const [journeyMythicals, setJourneyMythicals] = useState([]); // collected mythical ids
+  const [journeyBattle, setJourneyBattle] = useState(0); // 0-7 battles per chapter
+  const [journeyChapter, setJourneyChapter] = useState(0); // which mythical we're pursuing (0-6)
+  const [journeyReward, setJourneyReward] = useState(null);
+  const [journeyOpponent, setJourneyOpponent] = useState(null);
+  const [journeyRoster, setJourneyRoster] = useState([]); // 3 monsters assigned to player
+  const [journeySwapsLeft, setJourneySwapsLeft] = useState(3);
+  const [journeySwapSlot, setJourneySwapSlot] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(""); // "", "saving", "saved", "loaded"
+  const [hasSave, setHasSave] = useState({ journey: false, tournament: false });
+
+  // ═══ SAVE / LOAD SYSTEM ═══
+  const saveGame = useCallback(async (slot, data) => {
+    try {
+      setSaveStatus("saving");
+      await window.storage.set(`save:${slot}`, JSON.stringify({ ...data, timestamp: Date.now() }));
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(""), 1500);
+    } catch (e) { console.error("Save failed:", e); setSaveStatus(""); }
+  }, []);
+
+  const loadGame = useCallback(async (slot) => {
+    try {
+      const result = await window.storage.get(`save:${slot}`);
+      return result ? JSON.parse(result.value) : null;
+    } catch (e) { console.error("Load failed:", e); return null; }
+  }, []);
+
+  const deleteSave = useCallback(async (slot) => {
+    try { await window.storage.delete(`save:${slot}`); } catch (e) { /* ok */ }
+  }, []);
+
+  // Check for existing saves on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await window.storage.get("save:journey");
+        const t = await window.storage.get("save:tournament");
+        setHasSave({ journey: !!j, tournament: !!t });
+        const p = await window.storage.get("save:profile");
+        if (p) {
+          const profile = JSON.parse(p.value);
+          if (profile.partner && MONSTERS[profile.partner]) setPartner(MONSTERS[profile.partner]);
+          if (profile.journeyMythicals) setJourneyMythicals(profile.journeyMythicals);
+        }
+        // Check if tutorial has been seen
+        const tut = await window.storage.get("save:tutorialSeen");
+        if (!tut) { setShowTutorial(true); setTutorialPage(0); }
+        setTutorialChecked(true);
+      } catch (e) { setTutorialChecked(true); }
+    })();
+  }, []);
+
+  // Save profile (partner + mythicals) — called whenever these change
+  const saveProfile = useCallback(async () => {
+    try {
+      await window.storage.set("save:profile", JSON.stringify({
+        partner: partner?.id || null,
+        journeyMythicals,
+      }));
+    } catch (e) { /* ok */ }
+  }, [partner, journeyMythicals]);
+
+  useEffect(() => { saveProfile(); }, [partner, journeyMythicals, saveProfile]);
+
+  // Auto-save journey after battle win
+  const autoSaveJourney = useCallback(async () => {
+    await saveGame("journey", {
+      chapter: journeyChapter, battle: journeyBattle,
+      roster: journeyRoster.map(m => m.id), mythicals: journeyMythicals,
+      swapsLeft: journeySwapsLeft,
+    });
+    setHasSave(p => ({ ...p, journey: true }));
+  }, [journeyChapter, journeyBattle, journeyRoster, journeyMythicals, journeySwapsLeft, saveGame]);
+
+  // Auto-save tournament after round
+  const autoSaveTournament = useCallback(async () => {
+    await saveGame("tournament", {
+      currentBattle, difficulty, results: tournamentResults,
+      bracket: bracket.map(b => ({ ...b, monsters: b.monsters.map(m => ({ id: m.id, level: m.level })) })),
+    });
+    setHasSave(p => ({ ...p, tournament: true }));
+  }, [currentBattle, difficulty, tournamentResults, bracket, saveGame]);
+
+  // Load journey save
+  const loadJourneySave = useCallback(async () => {
+    const data = await loadGame("journey");
+    if (!data) return;
+    setGameMode("journey");
+    setJourneyChapter(data.chapter || 0);
+    setJourneyBattle(data.battle || 0);
+    setJourneyMythicals(data.mythicals || []);
+    setJourneySwapsLeft(data.swapsLeft ?? 3);
+    const roster = (data.roster || []).map(id => MONSTERS[id]).filter(Boolean);
+    setJourneyRoster(roster.length === 3 ? roster : generateJourneyRoster());
+    setJourneyOpponent(generateFreeplayOpponent((data.battle || 0) + (data.chapter || 0) * 8));
+    setSaveStatus("loaded");
+    setTimeout(() => setSaveStatus(""), 1500);
+    setScreen("journeyHub");
+  }, [loadGame]);
+
+  // Load tournament save
+  const loadTournamentSave = useCallback(async () => {
+    const data = await loadGame("tournament");
+    if (!data) return;
+    setGameMode("tournament");
+    setDifficulty(data.difficulty || "normal");
+    setCurrentBattle(data.currentBattle || 0);
+    setTournamentResults(data.results || {});
+    // Rebuild bracket from saved data
+    if (data.bracket?.length) {
+      const rebuilt = data.bracket.map(b => ({
+        ...b, monsters: b.monsters.map(md => ({ ...(MONSTERS[md.id] || MONSTERS.pyroclawl), level: md.level })),
+      }));
+      setBracket(rebuilt);
+    } else {
+      setBracket(generateTournamentBracket());
+    }
+    setSaveStatus("loaded");
+    setTimeout(() => setSaveStatus(""), 1500);
+    setScreen("tournamentHub");
+  }, [loadGame]); // which slot is being swapped
+
+  const MYTHICAL_ORDER = ["leviathos","zephyros","colossaur","voidreaper","seraphon","emperoptera","mythdrake"];
+
+  // What tiers can you swap in based on mythicals collected?
+  const getJourneyTierPool = () => {
+    const n = journeyMythicals.length;
+    if (n >= 5) return ["common", "rare", "mythical"];
+    if (n >= 2) return ["common", "rare"];
+    return ["common"];
+  };
+
+  // Generate a random 3-monster journey roster from available tier pool
+  const generateJourneyRoster = () => {
+    const pool = allMonsters.filter(m => m.tier === "common");
+    return pickN(pool, 3);
+  };
+
+  // Difficulty adapts in journey mode based on mythicals collected
+  const getJourneyDiff = () => {
+    const n = journeyMythicals.length;
+    if (n <= 1) return { label: "Novice", icon: "🌱", color: "#2ecc71", playerStartFP: 65, enemyStartFP: 40, enemyLevelBonus: -1, enemyFPGenMult: 0.8, enemyRotateChance: 0.3, enemySmartSkill: false, maxActions: 2 };
+    if (n <= 3) return { label: "Veteran", icon: "⚔️", color: "#f39c12", playerStartFP: 55, enemyStartFP: 50, enemyLevelBonus: 0, enemyFPGenMult: 1.0, enemyRotateChance: 0.55, enemySmartSkill: false, maxActions: 2 };
+    if (n <= 5) return { label: "Elite", icon: "🔥", color: "#e67e22", playerStartFP: 50, enemyStartFP: 55, enemyLevelBonus: 1, enemyFPGenMult: 1.15, enemyRotateChance: 0.7, enemySmartSkill: true, maxActions: 3 };
+    return { label: "Mythic", icon: "💀", color: "#e74c3c", playerStartFP: 40, enemyStartFP: 65, enemyLevelBonus: 2, enemyFPGenMult: 1.3, enemyRotateChance: 0.85, enemySmartSkill: true, maxActions: 3 };
+  };
+
+  const DIFF = { easy: { label: "Novice", icon: "🌱", color: "#2ecc71", desc: "Relaxed battles", playerStartFP: 70, enemyStartFP: 40, enemyLevelBonus: -1, enemyFPGenMult: 0.8, enemyRotateChance: 0.3, enemySmartSkill: false },
+    normal: { label: "Veteran", icon: "⚔️", color: "#f39c12", desc: "Balanced challenge", playerStartFP: 50, enemyStartFP: 50, enemyLevelBonus: 0, enemyFPGenMult: 1.0, enemyRotateChance: 0.6, enemySmartSkill: false },
+    hard: { label: "Mythic", icon: "💀", color: "#e74c3c", desc: "Brutal AI, boosted FP", playerStartFP: 40, enemyStartFP: 65, enemyLevelBonus: 2, enemyFPGenMult: 1.3, enemyRotateChance: 0.85, enemySmartSkill: true } };
+
+  const allMonsters = Object.values(MONSTERS);
+  const FL = <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Courier+Prime&display=swap" rel="stylesheet" />;
+  const ST = <style>{`@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}@keyframes flash{0%,100%{opacity:1}50%{opacity:0.3}}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes pulse{0%,100%{text-shadow:0 0 20px #f1c40f44}50%{text-shadow:0 0 40px #f1c40f88}}@keyframes drift{0%{transform:translateY(100vh) rotate(0deg);opacity:0}10%{opacity:0.6}90%{opacity:0.6}100%{transform:translateY(-10vh) rotate(360deg);opacity:0}}@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>;
+  const BG = "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 40%, #2d1b4e 70%, #0a0a1a 100%)";
+  const addLog = useCallback((t, tp = "info") => { setBattleLog(p => [...p.slice(-40), { text: t, type: tp }]); }, []);
+
+  const toggleRoster = (m) => { setSelectedRoster(p => { if (p.find(x => x.id === m.id)) return p.filter(x => x.id !== m.id); if (p.length >= 3) return p; return [...p, m]; }); };
+
+  const confirmTeam = () => {
+    const isJ = gameMode === "journey";
+    const roster = isJ ? journeyRoster : selectedRoster;
+    if (roster.length < 1) return;
+    const diff = isJ ? getJourneyDiff() : (DIFF[difficulty] || DIFF.normal);
+    const lvl = isJ ? 4 + journeyChapter * 2 + Math.floor(journeyBattle / 3) : gameMode === "tournament" ? 4 + currentBattle * 2 : 5 + currentBattle;
+    const team = roster.map((m, i) => ({ ...initBattleMonster(m, lvl), zone: i === 0 ? "AZ" : "SZ" }));
+    setPlayerTeam(team);
+    let ed;
+    if (isJ) {
+      ed = journeyOpponent;
+      if (journeyChapter >= 6 && journeyBattle >= 7) {
+        ed = { round: 1, name: "Final Boss", label: "BOSS", trainer: "Ancient Guardian", title: "Keeper of the Primordial Flame",
+          monsters: [{ ...MONSTERS.mythdrake, level: 14 }, { ...MONSTERS.emberwyrm, level: 12 }, { ...MONSTERS.pyroclawl, level: 11 }] };
+      }
+    } else if (gameMode === "tournament") ed = bracket[currentBattle];
+    else ed = currentOpponent || generateFreeplayOpponent(currentBattle);
+    if (!ed) return;
+    const elb = diff.enemyLevelBonus || 0;
+    const et = ed.monsters.map((m, i) => ({ ...initBattleMonster(m, Math.max(1, m.level + elb)), zone: i === 0 ? "AZ" : "SZ" }));
+
+    // ── Speed Priority: sum all alive team members' SPD ──
+    const playerTotalSpd = team.reduce((s, m) => s + m.spd, 0);
+    const enemyTotalSpd = et.reduce((s, m) => s + m.spd, 0);
+    const playerFirst = playerTotalSpd >= enemyTotalSpd; // ties go to player
+
+    setEnemyTeam(et); setPlayerFP(diff.playerStartFP); setEnemyFP(diff.enemyStartFP); setTurnNum(1);
+    const spdLog = [
+      { text: `⚔️ ${ed.trainer} challenges you!${isJ ? ` [Ch.${journeyChapter + 1} B${journeyBattle + 1}/8]` : ` [${diff.label}]`}`, type: "info" },
+      { text: `"${ed.title}"`, type: "info" },
+      { text: `⚡ You: ${diff.playerStartFP} FP — Enemy: ${diff.enemyStartFP} FP`, type: "fp" },
+      { text: `💨 Speed Check: You ${playerTotalSpd} vs Enemy ${enemyTotalSpd}`, type: "info" },
+      { text: playerFirst ? `💨 Your team is faster — you go first!` : `💨 Enemy team is faster — they strike first!`, type: playerFirst ? "heal" : "damage" },
+    ];
+    setBattleLog(spdLog);
+    setSelectedAction(null); setSelectingTarget(false); setSelectingRotate(false); setSelectingProtect(false); setBattleResult(null); setActionsThisTurn(0);
+
+    if (playerFirst) {
+      setTurn("player"); setScreen("battle");
+    } else {
+      // Enemy goes first — start in animating state, trigger enemy turn after short delay
+      setTurn("enemy"); setAnimating(true); setScreen("battle");
+      setTimeout(() => {
+        runEnemyTurn(team, et, diff.playerStartFP, diff.enemyStartFP);
+      }, 800);
+    }
+  };
+
+  // ═══ ACTIONS ═══
+  const executeSkill = useCallback((atkTeam, skill, defTeam, defIdx, atkFP) => {
+    const attacker = getAZ(atkTeam);
+    if (!attacker || atkFP < skill.fp) return { atkTeam, defTeam, newFP: atkFP, hit: false };
+    const newFP = atkFP - skill.fp;
+    const atkI = atkTeam.findIndex(m => m === attacker);
+    const nAtk = [...atkTeam]; nAtk[atkI] = { ...attacker };
+    addLog(`${attacker.emoji} ${attacker.name} uses ${skill.name}! (-${skill.fp} FP)`);
+
+    const buffDur = 2; // all buffs/debuffs last 2 turns
+    const applyBuffTo = (team, idx, key, turns) => { team[idx] = applyBuff(team[idx], key, turns || buffDur); };
+
+    // ─── BUFF SELF ───
+    if (skill.target === "self" && skill.effect && !skill.power) {
+      applyBuffTo(nAtk, atkI, skill.effect, skill.effect === "evasion" ? 2 : buffDur);
+      addLog(`${attacker.name}'s ${formatBuffName(skill.effect)} activated! (${buffDur} turns)`, "buff");
+      return { atkTeam: nAtk, defTeam, newFP, hit: true };
+    }
+
+    // ─── BUFF ALLY (target === "ally") — apply buff to any alive teammate ───
+    if (skill.target === "ally" && skill.effect && !skill.power) {
+      // Find the best target: SZ teammate, or self if alone
+      const allyIdx = nAtk.findIndex((m, i) => i !== atkI && m.alive && m.zone !== "PZ");
+      const tgt = allyIdx >= 0 ? allyIdx : atkI;
+      applyBuffTo(nAtk, tgt, skill.effect, buffDur);
+      addLog(`${nAtk[tgt].name}'s ${formatBuffName(skill.effect)} activated! (${buffDur} turns)`, "buff");
+      return { atkTeam: nAtk, defTeam, newFP, hit: true };
+    }
+
+    // ─── BUFF ALL ALLIES (target === "allAlly") ───
+    if (skill.target === "allAlly" && skill.effect && !skill.power) {
+      nAtk.forEach((m, i) => { if (m.alive) applyBuffTo(nAtk, i, skill.effect, buffDur); });
+      addLog(`Team ${formatBuffName(skill.effect)} activated! (${buffDur} turns)`, "buff");
+      return { atkTeam: nAtk, defTeam, newFP, hit: true };
+    }
+
+    // ─── HEAL ───
+    if (skill.effect === "heal") {
+      const hc = (nAtk[atkI].buffs.healCount || 0); const dim = Math.max(0.3, 1 - hc * 0.25);
+      let h = Math.floor((attacker.atk * 0.7 + 15) * dim); const syn = detectSynergy(nAtk);
+      if (syn?.synergy?.passive?.healBonus) h = Math.floor(h * (1 + syn.synergy.passive.healBonus));
+      nAtk[atkI] = { ...nAtk[atkI], buffs: { ...nAtk[atkI].buffs, healCount: hc + 1 } };
+      const healed = nAtk.map(m => m.alive ? { ...m, hp: Math.min(m.maxHP, m.hp + h) } : m);
+      addLog(`Team healed ${h} HP!${dim < 1 ? ` (${Math.round(dim * 100)}%)` : ""}`, "heal");
+      return { atkTeam: healed, defTeam, newFP, hit: true };
+    }
+
+    // ─── ATTACKS — can only hit non-PZ enemies ───
+    const nDef = [...defTeam];
+    const hittable = defTeam.map((m, i) => m.alive && m.zone !== "PZ" ? i : -1).filter(i => i >= 0);
+    const targets = skill.target === "all" ? hittable : [defIdx];
+    targets.forEach(ti => {
+      if (ti < 0 || !nDef[ti]?.alive || nDef[ti].zone === "PZ") return;
+      let d = { ...nDef[ti] };
+      const hitPct = calcHitChance(nAtk[atkI], skill, d, nAtk, nDef);
+      const roll = Math.random() * 100;
+      if (roll > hitPct) {
+        if (d.buffs.evasion > 0) d.buffs = { ...d.buffs, evasion: d.buffs.evasion - 1 };
+        nDef[ti] = d;
+        addLog(`${d.name} dodged! (${Math.round(hitPct)}% hit chance)`, "info");
+        return;
+      }
+      const dmg = calcDamage(nAtk[atkI], skill, d, nAtk, nDef);
+      const el = getElMult(skill.element, d.element);
+      d.hp = Math.max(0, d.hp - dmg); if (d.hp <= 0) { d.alive = false; d.zone = "SZ"; }
+      if (skill.effect === "drain") { let drainPct = 0.2; const syn = detectSynergy(nAtk); if (syn?.synergy?.passive?.drainBonus) drainPct += syn.synergy.passive.drainBonus; const hl = Math.floor(dmg * drainPct); nAtk[atkI] = { ...nAtk[atkI], hp: Math.min(nAtk[atkI].maxHP, nAtk[atkI].hp + hl) }; addLog(`${nAtk[atkI].name} drained ${hl} HP!`, "heal"); }
+      // Status debuffs applied on hit
+      if (skill.effect === "atkDown" && d.alive) { d = applyBuff(d, "atkDown", buffDur); addLog(`${d.name}'s ATK fell! (${buffDur}t)`, "buff"); }
+      if (skill.effect === "spdDown" && d.alive) { d = applyBuff(d, "spdDown", buffDur); addLog(`${d.name}'s SPD fell! (${buffDur}t)`, "buff"); }
+      if (skill.effect === "accDown" && d.alive) { d = applyBuff(d, "accDown", buffDur); addLog(`${d.name}'s ACC fell! (${buffDur}t)`, "buff"); }
+      if (skill.effect === "burn" && d.alive) { d = applyBuff(d, "burn", buffDur); addLog(`${d.name} is burning! 🔥 (${buffDur}t)`, "damage"); }
+      if (skill.effect === "poison" && d.alive) { d = applyBuff(d, "poison", 3); addLog(`${d.name} is poisoned! 🟢 (3t)`, "damage"); }
+      if (skill.effect === "stun" && d.alive) { d = applyBuff(d, "stun", 1); addLog(`${d.name} is stunned! ⚡ (1t)`, "buff"); }
+      nDef[ti] = d;
+      const eff = el > 1 ? " ⚡ Super effective!" : el < 1 ? " 🛡️ Resisted..." : "";
+      addLog(`${d.name} takes ${dmg} damage!${hasShield(defTeam[ti]) ? " 🔰-30%" : ""}${eff}${!d.alive ? " 💀 KO!" : ""}`, el > 1 ? "element" : "damage");
+    });
+    return { atkTeam: nAtk, defTeam: nDef, newFP, hit: true };
+  }, [addLog]);
+
+  // Player action (does NOT end turn)
+  const doPlayerAction = useCallback((skill, targetIdx) => {
+    if (animating || turn !== "player") return;
+    setAnimating(true); setSelectingTarget(false); setSelectedAction(null); setSelectingRotate(false); setSelectingProtect(false);
+    if (skill.power > 0) { setShakeId(`enemy-${targetIdx}`); setTimeout(() => setShakeId(null), 400); }
+    const res = executeSkill(playerTeam, skill, enemyTeam, targetIdx, playerFP);
+    setPlayerTeam(res.atkTeam); setEnemyTeam(res.defTeam); setPlayerFP(res.newFP); setActionsThisTurn(a => a + 1);
+    setTimeout(() => {
+      if (!res.defTeam.some(m => m.alive)) { addLog("🏆 Victory!", "heal"); setBattleResult("win"); setAnimating(false); return; }
+      let ed = res.defTeam; ed = autoPromote(ed, addLog); setEnemyTeam(ed);
+      setAnimating(false);
+    }, 500);
+  }, [animating, turn, playerTeam, enemyTeam, playerFP, executeSkill, addLog]);
+
+  // Rotate AZ ↔ SZ
+  const handleRotate = (idx) => {
+    if (animating || turn !== "player" || playerFP < ROTATE_COST) return;
+    const m = playerTeam[idx]; if (!m?.alive || m.zone !== "SZ") return;
+    const nt = playerTeam.map(mon => { if (mon.zone === "AZ") return { ...mon, zone: "SZ" }; if (mon === m) return { ...mon, zone: "AZ" }; return mon; });
+    setPlayerTeam(nt); setPlayerFP(p => p - ROTATE_COST); addLog(`🔄 ${m.name} rotated to Attack Zone! (-${ROTATE_COST} FP)`, "fp"); setSelectingRotate(false); setActionsThisTurn(a => a + 1);
+  };
+
+  // Send AZ or SZ monster to PZ
+  const handleProtect = (idx) => {
+    if (animating || turn !== "player" || playerFP < PROTECT_COST) return;
+    const m = playerTeam[idx]; if (!m?.alive || m.zone === "PZ") return;
+    if (m.zone === "AZ") {
+      // Must have another alive SZ to promote
+      const hasSZ = playerTeam.some(mon => mon.zone === "SZ" && mon.alive);
+      if (!hasSZ) { addLog("Can't protect — no SZ monster to replace AZ!", "info"); return; }
+    }
+    let nt = playerTeam.map(mon => mon === m ? { ...mon, zone: "PZ", pzTurns: PZ_DURATION } : mon);
+    if (m.zone === "AZ") nt = autoPromote(nt, addLog);
+    setPlayerTeam(nt); setPlayerFP(p => p - PROTECT_COST); addLog(`💤 ${m.name} sent to Protection Zone for ${PZ_DURATION} turns! (-${PROTECT_COST} FP)`, "fp"); setSelectingProtect(false); setActionsThisTurn(a => a + 1);
+  };
+
+  // Enemy full turn
+  const runEnemyTurn = useCallback((pTeam, eTeam, pFP, eFP) => {
+    const diff = gameMode === "journey" ? getJourneyDiff() : (DIFF[difficulty] || DIFF.normal);
+    let cE = [...eTeam], cP = [...pTeam], cEFP = eFP;
+    // Tick PZ timers
+    cE = tickPZ(cE, addLog);
+    // Tick buff durations + DoT
+    cE = tickBuffs(cE, addLog);
+    // Support healing
+    const h = applySupportHealing(cE); const azI = h.findIndex(m => m.zone === "AZ" && m.alive);
+    if (azI >= 0 && h[azI].hp > cE[azI]?.hp) addLog(`Enemy support heals ${h[azI].name} +${h[azI].hp - cE[azI].hp} HP`, "heal");
+    cE = h;
+    // FP gen
+    const eGen = Math.floor(calcTeamFPGen(cE) * diff.enemyFPGenMult);
+    cEFP = Math.min(MAX_FP, cEFP + eGen);
+    addLog(`⚡ Enemy generates +${eGen} FP (${cEFP} total)`, "fp");
+    // Check if AZ is stunned
+    const azCheck = getAZ(cE);
+    if (azCheck && isStunned(azCheck)) {
+      addLog(`⚡ ${azCheck.name} is stunned and can't act!`, "buff");
+    } else {
+      // AI: protect low HP monster?
+      const az = getAZ(cE);
+      if (az && az.hp < az.maxHP * 0.2 && getSZ(cE).length > 0 && cEFP >= PROTECT_COST && Math.random() < diff.enemyRotateChance * 0.5) {
+        const azI2 = cE.findIndex(m => m === az);
+        cE[azI2] = { ...az, zone: "PZ", pzTurns: PZ_DURATION }; cEFP -= PROTECT_COST;
+        cE = autoPromote(cE, addLog);
+        addLog(`💤 Enemy protects ${az.name}! (-${PROTECT_COST} FP)`, "fp");
+      }
+      // AI: rotate?
+      const newAZ = getAZ(cE);
+      if (newAZ && newAZ.hp < newAZ.maxHP * 0.25 && getSZ(cE).some(m => m.hp > m.maxHP * 0.5) && cEFP >= ROTATE_COST && Math.random() < diff.enemyRotateChance) {
+        const best = getSZ(cE).reduce((b, m) => !b || m.hp > b.hp ? m : b, null);
+        if (best) { cE = cE.map(m => { if (m.zone === "AZ") return { ...m, zone: "SZ" }; if (m === best) return { ...m, zone: "AZ" }; return m; }); cEFP -= ROTATE_COST; addLog(`🔄 Enemy rotated ${best.name} to AZ! (-${ROTATE_COST} FP)`, "fp"); }
+      }
+      // AI attacks
+      const maxAct = diff.enemySmartSkill ? 3 : 2; let acts = 0;
+      while (acts < maxAct && getAZ(cE)?.alive && cP.some(m => m.alive && m.zone !== "PZ")) {
+        const em = getAZ(cE); const usable = em.skills.filter(s => cEFP >= s.fp); if (!usable.length) break;
+        let sk; if (diff.enemySmartSkill) { const hp = em.hp / em.maxHP; const hl = usable.filter(s => s.effect === "heal"); const at = usable.filter(s => s.power > 0); if (hp < 0.35 && hl.length && acts === 0) sk = hl[0]; else if (at.length) sk = at.reduce((b, s) => s.power > b.power ? s : b, at[0]); else sk = usable[0]; } else sk = usable[Math.floor(Math.random() * usable.length)];
+        const hittable = cP.map((m, i) => m.alive && m.zone !== "PZ" ? i : -1).filter(i => i >= 0); if (!hittable.length) break;
+        const ti = sk.target === "self" || sk.target === "team" || sk.target === "ally" || sk.target === "allAlly" ? 0 : hittable[Math.floor(Math.random() * hittable.length)];
+        const r = executeSkill(cE, sk, cP, ti, cEFP); cE = r.atkTeam; cP = r.defTeam; cEFP = r.newFP; acts++;
+        if (!cP.some(m => m.alive)) break;
+        cP = autoPromote(cP, addLog);
+      }
+      if (acts === 0) addLog(`Enemy has no usable skills!`, "fp");
+    }
+
+    setTimeout(() => {
+      setEnemyTeam(cE); setEnemyFP(cEFP); setPlayerTeam(cP);
+      setShakeId("player-0"); setTimeout(() => setShakeId(null), 400);
+    }, 300);
+    setTimeout(() => {
+      if (!cP.some(m => m.alive)) { addLog("💀 Defeat...", "damage"); setBattleResult("lose"); setAnimating(false); return; }
+      // Player turn start: tick buffs, PZ, support heal, FP gen
+      let pNew = tickBuffs(cP, addLog);
+      pNew = tickPZ(pNew, addLog);
+      pNew = autoPromote(pNew, addLog);
+      const pH = applySupportHealing(pNew); const pAzI = pH.findIndex(m => m.zone === "AZ" && m.alive);
+      if (pAzI >= 0 && pH[pAzI].hp > pNew[pAzI]?.hp) addLog(`Your support heals ${pH[pAzI].name} +${pH[pAzI].hp - pNew[pAzI].hp} HP`, "heal");
+      pNew = pH;
+      const pGen = calcTeamFPGen(pNew); const newPFP = Math.min(MAX_FP, pFP + pGen);
+      setPlayerTeam(pNew); setPlayerFP(newPFP);
+      addLog(`⚡ Your team generates +${pGen} FP (${newPFP} total)`, "fp");
+      // Check if player AZ is stunned
+      const pAZ = getAZ(pNew);
+      if (pAZ && isStunned(pAZ)) addLog(`⚡ ${pAZ.name} is stunned — can only End Turn!`, "buff");
+      setTurnNum(t => t + 1); setActionsThisTurn(0); setTurn("player"); setAnimating(false);
+    }, 800);
+  }, [difficulty, executeSkill, addLog]);
+
+  const handleEndTurn = useCallback(() => {
+    if (animating || turn !== "player") return;
+    setAnimating(true); setSelectingTarget(false); setSelectedAction(null); setSelectingRotate(false); setSelectingProtect(false);
+    addLog(`⏭️ End turn (${actionsThisTurn} action${actionsThisTurn !== 1 ? "s" : ""}).`);
+    runEnemyTurn(playerTeam, enemyTeam, playerFP, enemyFP);
+  }, [animating, turn, playerTeam, enemyTeam, playerFP, enemyFP, actionsThisTurn, addLog, runEnemyTurn]);
+
+  const handleSkillClick = (skill) => {
+    if (animating || turn !== "player") return; const az = getAZ(playerTeam);
+    if (!az) return;
+    if (isStunned(az)) { addLog(`${az.name} is stunned and can't attack!`, "buff"); return; }
+    if (playerFP < skill.fp) { addLog(`Not enough FP! (need ${skill.fp})`, "fp"); return; }
+    if (skill.target === "self" || skill.target === "team") doPlayerAction(skill, 0);
+    else if (skill.target === "all") doPlayerAction(skill, 0);
+    else { setSelectedAction(skill); setSelectingTarget(true); setSelectingRotate(false); setSelectingProtect(false); }
+  };
+
+  // Ultimate species move — guaranteed hit on all non-PZ, special handling
+  const handleUltimate = () => {
+    if (animating || turn !== "player") return;
+    const syn = detectSynergy(playerTeam);
+    if (!syn) return;
+    const ult = syn.synergy.ultimate;
+    if (playerFP < ult.fp) { addLog(`Not enough FP for ${ult.name}! (need ${ult.fp})`, "fp"); return; }
+    setAnimating(true); setSelectingTarget(false); setSelectedAction(null); setSelectingRotate(false); setSelectingProtect(false);
+
+    // Special log for ultimate
+    addLog(`🌟 ${syn.synergy.emoji} ${syn.synergy.name} ACTIVATED!`, "element");
+    addLog(`💥 ${ult.name}! (-${ult.fp} FP)`, "damage");
+
+    const newFP = playerFP - ult.fp;
+    setPlayerFP(newFP);
+
+    // Ultimate always hits all non-PZ enemies — guaranteed, no ACC check
+    const nDef = [...enemyTeam];
+    const hittable = nDef.map((m, i) => m.alive && m.zone !== "PZ" ? i : -1).filter(i => i >= 0);
+    const attacker = getAZ(playerTeam);
+    const atkI = playerTeam.findIndex(m => m === attacker);
+    const nAtk = [...playerTeam];
+
+    hittable.forEach(ti => {
+      let d = { ...nDef[ti] };
+      const dmg = calcDamage(attacker, ult, d, nAtk, nDef);
+      d.hp = Math.max(0, d.hp - dmg);
+      if (d.hp <= 0) { d.alive = false; d.zone = "SZ"; }
+      nDef[ti] = d;
+      addLog(`${d.name} takes ${dmg} damage!${!d.alive ? " 💀 KO!" : ""}`, "damage");
+    });
+
+    // If the ultimate also heals (Genesis Light)
+    if (ult.effect === "heal") {
+      const h = Math.floor(attacker.atk * 0.8 + 25);
+      const healed = nAtk.map(m => m.alive ? { ...m, hp: Math.min(m.maxHP, m.hp + h) } : m);
+      addLog(`Genesis Light heals team for ${h} HP!`, "heal");
+      setPlayerTeam(healed);
+    } else {
+      setPlayerTeam(nAtk);
+    }
+
+    setEnemyTeam(nDef);
+    setShakeId("enemy-0"); setTimeout(() => setShakeId(null), 600);
+    setActionsThisTurn(a => a + 1);
+
+    setTimeout(() => {
+      if (!nDef.some(m => m.alive)) { addLog("🏆 Victory!", "heal"); setBattleResult("win"); setAnimating(false); return; }
+      let ed = [...nDef]; ed = autoPromote(ed, addLog); setEnemyTeam(ed);
+      setAnimating(false);
+    }, 700);
+  };
+  const handleTargetSelect = (idx) => { if (selectingTarget && selectedAction) { const m = enemyTeam[idx]; if (m?.alive && m.zone !== "PZ") doPlayerAction(selectedAction, idx); else addLog("Can't target monsters in Protection Zone!", "info"); } };
+  const handleBattleEnd = () => {
+    if (gameMode === "journey") {
+      if (battleResult === "win") {
+        const nextB = journeyBattle + 1;
+        if (nextB >= 8) {
+          const reward = MONSTERS[MYTHICAL_ORDER[journeyChapter]];
+          setJourneyReward(reward);
+          setScreen("journeyReward");
+        } else {
+          setJourneyBattle(nextB);
+          setJourneyOpponent(generateFreeplayOpponent(nextB + journeyChapter * 8));
+          if (nextB % 2 === 0) {
+            setJourneySwapsLeft(3);
+            setScreen("journeySwap");
+          } else {
+            setSelectedRoster(journeyRoster);
+            setScreen("journeySwap");
+          }
+        }
+        // Auto-save journey after every win
+        setTimeout(() => autoSaveJourney(), 100);
+      } else {
+        setScreen("journeySwap");
+      }
+    } else if (gameMode === "tournament") {
+      const nr = { ...tournamentResults, [currentBattle]: battleResult }; setTournamentResults(nr);
+      if (battleResult === "win") {
+        if (currentBattle >= bracket.length - 1) setScreen("partnerReward");
+        else { setCurrentBattle(currentBattle + 1); setSelectedRoster([]); setScreen("tournamentHub"); }
+        // Auto-save tournament after every win
+        setTimeout(() => autoSaveTournament(), 100);
+      } else setScreen("tournamentHub");
+    } else {
+      const nb = battleResult === "win" ? currentBattle + 1 : currentBattle;
+      if (battleResult === "win") { setWins(w => w + 1); setCurrentBattle(nb); }
+      setCurrentOpponent(generateFreeplayOpponent(nb)); setSelectedRoster([]); setScreen("teamSelect");
+    }
+  };
+
+  // ═══ SCREENS ═══
+  // ═══ TUTORIAL ═══
+  const TUTORIAL_PAGES = [
+    { title: "Welcome to Mythic Fossils!", icon: "🐉", content: [
+      { text: "You've discovered ancient fossils with elemental powers! Revive them, build a team of 3, and battle through tournaments and a journey to collect all 7 mythical fossils.", color: "#ccc" },
+      { text: "This tutorial will walk you through everything. You can re-read it anytime from the title screen.", color: "#888" },
+    ]},
+    { title: "Zone System", icon: "⚔️", content: [
+      { label: "⚔️ Attack Zone (AZ)", text: "Your front monster. It attacks and gets targeted by enemies.", color: "#e74c3c" },
+      { label: "🛡️ Support Zone (SZ)", text: "Back monsters that passively buff your AZ and generate FP (Fossil Points) each turn.", color: "#3498db" },
+      { label: "💤 Protection Zone (PZ)", text: "Send a monster here to be safe from ALL attacks for 2 turns (costs 20 FP). No support or FP generation while protected.", color: "#9b59b6" },
+      { text: "You can Rotate (swap AZ ↔ SZ for 15 FP) to bring in a fresh fighter.", color: "#aaa" },
+    ]},
+    { title: "Multi-Action Turns", icon: "⚡", content: [
+      { text: "Each turn you can take MULTIPLE actions, spending FP for each — attack, buff, rotate, protect — as many as you can afford!", color: "#ccc" },
+      { text: "When you're done, hit End Turn. The enemy then takes their turn the same way.", color: "#ccc" },
+      { text: "FP regenerates at the start of each turn based on your SZ monsters' FP Gen stats.", color: "#5dade2" },
+    ]},
+    { title: "Stats & Accuracy", icon: "🎯", content: [
+      { label: "ATK", text: "Determines damage output.", color: "#e74c3c" },
+      { label: "DEF", text: "Reduces incoming damage.", color: "#3498db" },
+      { label: "ACC", text: "Accuracy — your hit chance against the enemy's SPD.", color: "#e8a" },
+      { label: "SPD", text: "Speed — helps dodge attacks and determines which team goes first!", color: "#2ecc71" },
+      { text: "High-power moves have lower accuracy — risk vs. reward! Team total SPD determines turn order at battle start.", color: "#aaa" },
+    ]},
+    { title: "Elements", icon: "🔥", content: [
+      { text: "6 elements in a cycle: 🔥Fire → 🪨Earth → 🌪️Wind → 💧Water → 🔥Fire", color: "#e67e22" },
+      { text: "🌑Shadow ↔ ✨Light are mutually weak to each other.", color: "#9b59b6" },
+      { text: "Super effective = 1.5× damage. Resisted = 0.7× damage. Use the 📊 chart in battle for reference!", color: "#ccc" },
+    ]},
+    { title: "Status Effects", icon: "🔥", content: [
+      { label: "🔥 Burn", text: "8% max HP damage per turn for 2 turns.", color: "#e74c3c" },
+      { label: "🟢 Poison", text: "6% max HP damage per turn for 3 turns.", color: "#2ecc71" },
+      { label: "⚡ Stun", text: "Target skips their next turn entirely.", color: "#f1c40f" },
+      { label: "🔰 Shield", text: "Reduces incoming damage by 30% for 2 turns.", color: "#3498db" },
+      { text: "All buffs and debuffs last 2 turns, then expire automatically.", color: "#aaa" },
+    ]},
+    { title: "Species Synergy", icon: "🌟", content: [
+      { text: "Each monster belongs to a species family (Drake, Leviathan, Raptor, etc.) with Common, Rare, and Mythical tiers.", color: "#ccc" },
+      { text: "Pick all 3 tiers of ONE species on your team to activate a powerful synergy!", color: "#f1c40f" },
+      { text: "Synergy gives a passive team buff (always active) + an Ultimate Move — a guaranteed-hit AOE that devastates all enemies.", color: "#f1c40f" },
+    ]},
+    { title: "Game Modes", icon: "🗺️", content: [
+      { label: "🏆 Tournament", text: "4-round bracket with chosen difficulty. Win all 4 to earn a partner monster! Pick your team freely.", color: "#f1c40f" },
+      { label: "🗺️ Journey", text: "Collect all 7 mythical fossils! You start with 3 random commons and get swap windows every 2 battles. AI gets harder as you collect more mythicals. Rares unlock at 2, Mythicals at 5.", color: "#9b59b6" },
+      { label: "⚔️ Free Battle", text: "Endless battles with chosen difficulty. Pick your team, fight randomized opponents.", color: "#e74c3c" },
+    ]},
+  ];
+
+  const closeTutorial = async () => {
+    setShowTutorial(false);
+    try { await window.storage.set("save:tutorialSeen", "true"); } catch (e) { /* ok */ }
+  };
+
+  // Show tutorial overlay (either first-time or manual)
+  if (showTutorial) {
+    const pg = TUTORIAL_PAGES[tutorialPage];
+    const isLast = tutorialPage >= TUTORIAL_PAGES.length - 1;
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 20 }}>
+        {FL}{ST}
+        {/* Page indicator */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+          {TUTORIAL_PAGES.map((_, i) => (
+            <div key={i} onClick={() => setTutorialPage(i)} style={{
+              width: i === tutorialPage ? 18 : 8, height: 8, borderRadius: 4, cursor: "pointer", transition: "all 0.3s",
+              background: i === tutorialPage ? "#f1c40f" : i < tutorialPage ? "rgba(46,204,113,0.5)" : "rgba(255,255,255,0.12)",
+            }} />
+          ))}
+        </div>
+
+        <div style={{ fontSize: 36, marginBottom: 6 }}>{pg.icon}</div>
+        <h2 style={{ fontSize: 18, fontWeight: 900, letterSpacing: 3, marginBottom: 12, background: "linear-gradient(135deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", textAlign: "center" }}>{pg.title}</h2>
+
+        <div style={{ maxWidth: 360, width: "100%", display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+          {pg.content.map((item, i) => (
+            <div key={i} style={{ padding: "8px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+              {item.label && <div style={{ fontSize: 10, fontWeight: 700, color: item.color || "#fff", marginBottom: 3 }}>{item.label}</div>}
+              <div style={{ fontSize: 9, color: item.color || "#ccc", lineHeight: 1.5 }}>{item.text}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {tutorialPage > 0 && (
+            <button onClick={() => setTutorialPage(p => p - 1)} style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20,
+              color: "#aaa", padding: "8px 20px", fontSize: 10, cursor: "pointer", fontFamily: "'Cinzel', serif",
+            }}>← Back</button>
+          )}
+          {!isLast ? (
+            <button onClick={() => setTutorialPage(p => p + 1)} style={{
+              background: "linear-gradient(135deg, #f1c40f, #e67e22)", color: "#1a0a2e", border: "none", padding: "8px 28px",
+              borderRadius: 20, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer",
+            }}>Next →</button>
+          ) : (
+            <button onClick={closeTutorial} style={{
+              background: "linear-gradient(135deg, #2ecc71, #27ae60)", color: "#fff", border: "none", padding: "10px 32px",
+              borderRadius: 20, fontSize: 12, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer",
+            }}>Let's Play! 🐉</button>
+          )}
+        </div>
+        {!isLast && (
+          <button onClick={closeTutorial} style={{
+            marginTop: 10, background: "none", border: "none", color: "#555", fontSize: 8, cursor: "pointer",
+            fontFamily: "'Cinzel', serif", textDecoration: "underline",
+          }}>Skip Tutorial</button>
+        )}
+        <div style={{ fontSize: 7, color: "#444", marginTop: 12 }}>Page {tutorialPage + 1} of {TUTORIAL_PAGES.length}</div>
+      </div>
+    );
+  }
+
+  // Wait for tutorial check before showing title
+  if (!tutorialChecked) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: BG, color: "#555", fontFamily: "'Cinzel', serif" }}>{FL}{ST}Loading...</div>;
+
+  if (screen === "title") return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 20, position: "relative", overflow: "hidden" }}>{FL}{ST}{[...Array(10)].map((_, i) => <div key={i} style={{ position: "absolute", left: `${10 + Math.random() * 80}%`, top: `${Math.random() * 100}%`, fontSize: [14, 18, 22][i % 3], animation: `drift ${8 + Math.random() * 10}s linear infinite`, animationDelay: `${Math.random() * 8}s`, opacity: 0.4, pointerEvents: "none" }}>{["🔥", "💧", "🌪️", "🪨", "🌑", "✨"][i % 6]}</div>)}<div style={{ fontSize: 56, marginBottom: 6, animation: "float 3s ease-in-out infinite" }}>🐉</div><h1 style={{ fontSize: 36, fontWeight: 900, letterSpacing: 4, background: "linear-gradient(135deg, #f1c40f, #e67e22, #e74c3c, #9b59b6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", textAlign: "center", lineHeight: 1.1, marginBottom: 4, animation: "pulse 3s ease-in-out infinite" }}>MYTHIC<br />FOSSILS</h1><p style={{ fontSize: 11, color: "#8e8ea0", letterSpacing: 3, textTransform: "uppercase", marginBottom: 20 }}>Revive • Position • Conquer</p>{partner && <div style={{ marginBottom: 14, textAlign: "center", animation: "fadeIn 0.6s ease" }}><div style={{ fontSize: 8, color: "#f1c40f88", letterSpacing: 2 }}>YOUR PARTNER</div><div style={{ fontSize: 28 }}>{partner.emoji}</div><div style={{ fontSize: 10, color: ELEMENTS[partner.element].color, fontWeight: 700 }}>{partner.name}</div></div>}{journeyMythicals.length > 0 && <div style={{ marginBottom: 12, textAlign: "center", animation: "fadeIn 0.6s ease" }}><div style={{ fontSize: 7, color: "#9b59b688", letterSpacing: 2, marginBottom: 3 }}>MYTHICAL COLLECTION</div><div style={{ display: "flex", gap: 4, justifyContent: "center" }}>{journeyMythicals.map(mid => { const m = MONSTERS[mid]; return <span key={mid} title={m.name} style={{ fontSize: 18 }}>{m.emoji}</span>; })}{journeyMythicals.length < 7 && <span style={{ fontSize: 12, color: "#555" }}>+{7 - journeyMythicals.length}</span>}</div></div>}<div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", zIndex: 1 }}><button onClick={() => { setGameMode("tournament"); setScreen("difficultySelect"); }} style={{ background: "linear-gradient(135deg, #f1c40f, #e67e22)", color: "#1a0a2e", border: "none", padding: "12px 34px", borderRadius: 26, fontSize: 13, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase", boxShadow: "0 4px 18px rgba(241,196,15,0.4)" }}>🏆 Tournament</button><button onClick={() => { setGameMode("journey"); setJourneyBattle(0); setJourneyChapter(journeyMythicals.length >= 7 ? 6 : journeyMythicals.length); const r = generateJourneyRoster(); setJourneyRoster(r); setJourneySwapsLeft(3); setJourneyOpponent(generateFreeplayOpponent(journeyMythicals.length * 8)); setScreen("journeyHub"); }} style={{ background: "linear-gradient(135deg, #9b59b6, #8e44ad)", color: "#fff", border: "none", padding: "12px 34px", borderRadius: 26, fontSize: 13, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase", boxShadow: "0 4px 18px rgba(155,89,182,0.4)" }}>🗺️ Journey</button><button onClick={() => { setGameMode("freeplay"); setScreen("difficultySelect"); }} style={{ background: "linear-gradient(135deg, #e74c3c, #c0392b)", color: "#fff", border: "none", padding: "10px 28px", borderRadius: 26, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>⚔️ Free Battle</button><button onClick={() => { setTutorialPage(0); setShowTutorial(true); }} style={{ background: "none", border: "1px solid rgba(255,255,255,0.12)", color: "#888", padding: "6px 20px", borderRadius: 20, fontSize: 9, cursor: "pointer", fontFamily: "'Cinzel', serif", letterSpacing: 1, marginTop: 4 }}>📖 How to Play</button></div>{(hasSave.journey || hasSave.tournament) && <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center", marginTop: 8, zIndex: 1 }}><div style={{ fontSize: 7, color: "#888", letterSpacing: 2, marginBottom: 2 }}>CONTINUE SAVE</div>{hasSave.journey && <button onClick={loadJourneySave} style={{ background: "linear-gradient(135deg, rgba(155,89,182,0.25), rgba(155,89,182,0.4))", color: "#c39bd3", border: "1px solid #9b59b655", padding: "7px 24px", borderRadius: 20, fontSize: 10, fontFamily: "'Cinzel', serif", fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}>📂 Continue Journey</button>}{hasSave.tournament && <button onClick={loadTournamentSave} style={{ background: "linear-gradient(135deg, rgba(241,196,15,0.15), rgba(241,196,15,0.3))", color: "#f1c40f", border: "1px solid #f1c40f44", padding: "7px 24px", borderRadius: 20, fontSize: 10, fontFamily: "'Cinzel', serif", fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}>📂 Continue Tournament</button>}</div>}{saveStatus && <div style={{ position: "fixed", top: 10, right: 10, padding: "4px 12px", borderRadius: 8, background: saveStatus === "saved" ? "rgba(46,204,113,0.2)" : saveStatus === "loaded" ? "rgba(93,173,226,0.2)" : "rgba(255,255,255,0.1)", border: `1px solid ${saveStatus === "saved" ? "#2ecc7144" : saveStatus === "loaded" ? "#5dade244" : "#fff1"}`, fontSize: 8, color: saveStatus === "saved" ? "#2ecc71" : saveStatus === "loaded" ? "#5dade2" : "#aaa", fontFamily: "'Cinzel', serif", zIndex: 99, animation: "fadeIn 0.3s ease" }}>{saveStatus === "saving" ? "💾 Saving..." : saveStatus === "saved" ? "✓ Saved" : "📂 Loaded"}</div>}</div>;
+
+  if (screen === "difficultySelect") return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 20 }}>{FL}{ST}<div style={{ fontSize: 32, marginBottom: 6 }}>{gameMode === "tournament" ? "🏆" : "⚔️"}</div><h2 style={{ fontSize: 20, fontWeight: 900, letterSpacing: 3, marginBottom: 4, background: "linear-gradient(135deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Choose Difficulty</h2><p style={{ fontSize: 11, color: "#aaa", marginBottom: 20 }}>Select your challenge level</p><div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 340 }}>{["easy", "normal", "hard"].map(k => { const d = DIFF[k]; return <button key={k} onClick={() => { setDifficulty(k); if (gameMode === "tournament") { setCurrentBattle(0); setTournamentResults({}); setWins(0); setBracket(generateTournamentBracket()); setScreen("tournamentHub"); } else { setCurrentBattle(0); setSelectedRoster([]); setCurrentOpponent(generateFreeplayOpponent(0)); setScreen("teamSelect"); } }} style={{ background: `linear-gradient(135deg, ${d.color}15, ${d.color}25)`, border: `2px solid ${d.color}55`, borderRadius: 12, padding: "14px 16px", cursor: "pointer", textAlign: "left", display: "flex", gap: 12, alignItems: "center" }}><div style={{ fontSize: 24, width: 36, textAlign: "center" }}>{d.icon}</div><div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 900, color: d.color, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'Cinzel', serif" }}>{d.label}</div><div style={{ fontSize: 9, color: "#aaa" }}>{d.desc}</div><div style={{ fontSize: 7, color: "#666", marginTop: 3, fontFamily: "monospace" }}>You: ⚡{d.playerStartFP} | Enemy: ⚡{d.enemyStartFP} | Lv{d.enemyLevelBonus >= 0 ? "+" : ""}{d.enemyLevelBonus}</div></div><div style={{ color: d.color, fontSize: 14 }}>→</div></button>; })}</div><button onClick={() => setScreen("title")} style={{ marginTop: 16, background: "none", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "6px 16px", borderRadius: 16, fontSize: 9, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>← Back</button></div>;
+
+  if (screen === "tournamentHub") { const c = bracket[currentBattle]; if (!c) return null; const ll = tournamentResults[currentBattle] === "lose"; const di = DIFF[difficulty] || DIFF.normal; return <div style={{ minHeight: "100vh", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 18, display: "flex", flexDirection: "column", alignItems: "center" }}>{FL}{ST}<h2 style={{ fontSize: 16, fontWeight: 900, letterSpacing: 3, marginBottom: 3, background: "linear-gradient(135deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Tournament</h2><div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10 }}><span style={{ fontSize: 8, color: "#888" }}>Difficulty:</span><span style={{ fontSize: 8, padding: "1px 6px", borderRadius: 6, background: `${di.color}22`, color: di.color, border: `1px solid ${di.color}44` }}>{di.icon} {di.label}</span></div><TournamentBracket currentRound={currentBattle} results={tournamentResults} bracket={bracket} /><div style={{ margin: "14px 0", padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", maxWidth: 360, width: "100%", textAlign: "center" }}>{ll && <div style={{ marginBottom: 8, padding: "5px 10px", background: "rgba(231,76,60,0.15)", borderRadius: 6, fontSize: 9, color: "#e74c3c" }}>Lost to {c.trainer}. Retry!</div>}<div style={{ fontSize: 7, color: "#f1c40f", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>{c.name}</div><div style={{ fontSize: 14, fontWeight: 700, marginBottom: 1 }}>{c.trainer}</div><div style={{ fontSize: 8, color: "#aaa", fontStyle: "italic", marginBottom: 10 }}>{c.title}</div><div style={{ display: "flex", gap: 5, justifyContent: "center", marginBottom: 12, flexWrap: "wrap" }}>{c.monsters.map((m, i) => <div key={i} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 7, padding: "5px 7px", border: `1px solid ${ELEMENTS[m.element].color}33`, textAlign: "center" }}><div style={{ fontSize: 18 }}>{m.emoji}</div><div style={{ fontSize: 7, fontWeight: 700 }}>{m.name}</div><div style={{ fontSize: 5, color: ELEMENTS[m.element].color }}>{ELEMENTS[m.element].icon} Lv.{m.level}</div></div>)}</div><button onClick={() => { setSelectedRoster([]); setScreen("teamSelect"); }} style={{ background: "linear-gradient(135deg, #f1c40f, #e67e22)", color: "#1a0a2e", border: "none", padding: "9px 28px", borderRadius: 20, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>Choose Team</button></div><button onClick={() => setScreen("title")} style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "5px 14px", borderRadius: 14, fontSize: 8, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>← Menu</button></div>; }
+
+  if (screen === "partnerReward") return <>{FL}{ST}<PartnerRewardScreen onChoose={m => { setPartner(m); deleteSave("tournament"); setHasSave(p => ({ ...p, tournament: false })); setScreen("postPartner"); }} /></>;
+
+  // ═══ JOURNEY HUB ═══
+  if (screen === "journeyHub") {
+    const jd = getJourneyDiff();
+    const targetMythical = MONSTERS[MYTHICAL_ORDER[Math.min(journeyChapter, 6)]];
+    const isFinal = journeyChapter >= 6;
+    const allCollected = journeyMythicals.length >= 7;
+    return (
+      <div style={{ minHeight: "100vh", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 16, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {FL}{ST}
+        <h2 style={{ fontSize: 18, fontWeight: 900, letterSpacing: 3, marginBottom: 2, background: "linear-gradient(135deg, #9b59b6, #8e44ad)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>🗺️ Journey Mode</h2>
+        <p style={{ fontSize: 8, color: "#aaa", marginBottom: 10 }}>Collect all 7 mythical fossils to become the ultimate champion</p>
+
+        {/* Collection Progress */}
+        <div style={{ width: "100%", maxWidth: 400, marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#888", marginBottom: 4 }}>
+            <span>Collection: {journeyMythicals.length}/7</span>
+            <span style={{ color: jd.color }}>{jd.icon} AI: {jd.label}</span>
+          </div>
+          <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            {MYTHICAL_ORDER.map((mid, i) => {
+              const m = MONSTERS[mid]; const el = ELEMENTS[m.element]; const collected = journeyMythicals.includes(mid);
+              const isCurrent = i === journeyChapter && !allCollected;
+              return (
+                <div key={mid} style={{ width: 52, padding: "5px 3px", borderRadius: 8, textAlign: "center",
+                  background: collected ? `${el.color}22` : isCurrent ? "rgba(241,196,15,0.15)" : "rgba(0,0,0,0.2)",
+                  border: `2px solid ${collected ? el.color : isCurrent ? "#f1c40f66" : "rgba(255,255,255,0.06)"}`,
+                  opacity: collected || isCurrent ? 1 : 0.35,
+                }}>
+                  <div style={{ fontSize: 18 }}>{collected ? m.emoji : isCurrent ? "❓" : "🔒"}</div>
+                  <div style={{ fontSize: 5, color: collected ? el.color : "#888", fontWeight: 700 }}>{collected ? m.name : isCurrent ? "???" : "???"}</div>
+                  {collected && <div style={{ fontSize: 5, color: "#2ecc71" }}>✓</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {allCollected ? (
+          <div style={{ textAlign: "center", padding: 20, background: "linear-gradient(135deg, rgba(241,196,15,0.1), rgba(155,89,182,0.1))", borderRadius: 12, border: "1px solid rgba(241,196,15,0.3)", maxWidth: 360 }}>
+            <div style={{ fontSize: 36, marginBottom: 6 }}>🐉👑</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "#f1c40f", letterSpacing: 2, marginBottom: 4 }}>JOURNEY COMPLETE!</div>
+            <div style={{ fontSize: 9, color: "#ccc" }}>You've collected all 7 mythical fossils. You are the ultimate Fossil Champion!</div>
+          </div>
+        ) : (
+          <div style={{ padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", maxWidth: 360, width: "100%", textAlign: "center" }}>
+            <div style={{ fontSize: 8, color: "#9b59b6", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>
+              {isFinal ? "FINAL CHAPTER" : `Chapter ${journeyChapter + 1} of 7`}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>
+              {isFinal ? "🐉 The Primordial Drake" : `Hunting: ${targetMythical?.emoji || "?"} ???`}
+            </div>
+            <div style={{ fontSize: 8, color: "#aaa", marginBottom: 8 }}>
+              {isFinal ? "Defeat the Ancient Guardian to claim Mythdrake" : `Win 8 battles to excavate a mythical fossil`}
+            </div>
+            {/* Battle Progress */}
+            <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 10 }}>
+              {[...Array(8)].map((_, i) => (
+                <div key={i} style={{
+                  width: 24, height: 24, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: i < journeyBattle ? "rgba(46,204,113,0.25)" : i === journeyBattle ? "rgba(241,196,15,0.25)" : "rgba(0,0,0,0.2)",
+                  border: `1px solid ${i < journeyBattle ? "#2ecc71" : i === journeyBattle ? "#f1c40f" : "rgba(255,255,255,0.06)"}`,
+                  fontSize: 9, color: i < journeyBattle ? "#2ecc71" : i === journeyBattle ? "#f1c40f" : "#555",
+                }}>{i < journeyBattle ? "✓" : i === journeyBattle ? "⚔️" : i + 1}</div>
+              ))}
+            </div>
+            <div style={{ fontSize: 7, color: "#666", marginBottom: 6 }}>
+              Battle {journeyBattle + 1}/8 · AI scales with mythicals · {journeyBattle > 0 && journeyBattle % 2 === 0 ? "🔄 Swap window!" : `Next swap: battle ${(Math.floor(journeyBattle / 2) + 1) * 2 + 1}`}
+            </div>
+            {/* Current Roster */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 7, color: "#9b59b6", letterSpacing: 1, marginBottom: 4 }}>YOUR TEAM:</div>
+              <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
+                {journeyRoster.map((m, i) => { const el = ELEMENTS[m.element]; return (
+                  <div key={m.id + i} style={{ padding: "4px 8px", background: `${el.color}15`, borderRadius: 7, border: `1px solid ${el.color}33`, textAlign: "center" }}>
+                    <div style={{ fontSize: 18 }}>{m.emoji}</div>
+                    <div style={{ fontSize: 7, fontWeight: 700, color: "#fff" }}>{m.name}</div>
+                    <div style={{ fontSize: 5, color: el.color }}>{el.icon} {m.tier} · {m.species}</div>
+                  </div>
+                ); })}
+              </div>
+              <div style={{ fontSize: 6, color: "#888", marginTop: 3 }}>
+                Tiers available: {getJourneyTierPool().map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ")}
+                {journeyMythicals.length < 2 && " · Collect 2 mythicals to unlock Rare swaps"}
+              </div>
+            </div>
+            <button onClick={() => { if (!journeyOpponent) setJourneyOpponent(generateFreeplayOpponent(journeyBattle + journeyChapter * 8)); setScreen("journeySwap"); }} style={{
+              background: "linear-gradient(135deg, #9b59b6, #8e44ad)", color: "#fff", border: "none", padding: "9px 28px",
+              borderRadius: 20, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase",
+            }}>Prepare & Fight</button>
+          </div>
+        )}
+        <button onClick={() => setScreen("title")} style={{ marginTop: 12, background: "none", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "5px 14px", borderRadius: 14, fontSize: 8, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>← Menu</button>
+      </div>
+    );
+  }
+
+  // ═══ JOURNEY REWARD ═══
+  if (screen === "journeyReward") {
+    const m = journeyReward;
+    const el = m ? ELEMENTS[m.element] : { color: "#888", icon: "", name: "" };
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: 24, textAlign: "center" }}>
+        {FL}{ST}
+        <style>{`@keyframes mythGlow{0%,100%{box-shadow:0 0 30px ${el.color}44,0 0 60px ${el.color}22}50%{box-shadow:0 0 50px ${el.color}66,0 0 100px ${el.color}33}}@keyframes mythPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}`}</style>
+        <div style={{ fontSize: 11, color: "#9b59b688", letterSpacing: 4, textTransform: "uppercase", marginBottom: 8 }}>Mythical Fossil Excavated!</div>
+        <div style={{ fontSize: 10, color: "#f1c40f", letterSpacing: 2, marginBottom: 14 }}>Chapter {journeyChapter + 1} Complete</div>
+        <div style={{ width: 130, height: 130, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: `radial-gradient(circle, ${el.color}33, transparent 70%)`, animation: "mythGlow 3s ease-in-out infinite, mythPulse 2s ease-in-out infinite", marginBottom: 16 }}>
+          <span style={{ fontSize: 64 }}>{m?.emoji}</span>
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 900, letterSpacing: 3, marginBottom: 3, background: `linear-gradient(135deg, ${el.color}, #f1c40f)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{m?.name}</h2>
+        <div style={{ fontSize: 10, color: el.color, marginBottom: 4 }}>{el.icon} {el.name} · {m?.species} · Mythical</div>
+        <div style={{ fontSize: 9, color: "#aaa", marginBottom: 14, maxWidth: 320, fontStyle: "italic", lineHeight: 1.5 }}>{m?.desc}</div>
+        <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 20px", border: "1px solid rgba(255,255,255,0.08)", marginBottom: 10, display: "flex", gap: 14, fontSize: 10, color: "#ccc" }}>
+          <span><span style={{ color: "#e74c3c" }}>HP</span> {m?.baseHP}</span>
+          <span><span style={{ color: "#e67e22" }}>ATK</span> {m?.baseAtk}</span>
+          <span><span style={{ color: "#3498db" }}>DEF</span> {m?.baseDef}</span>
+          <span><span style={{ color: "#e8a" }}>ACC</span> {m?.baseAcc}</span>
+          <span><span style={{ color: "#2ecc71" }}>SPD</span> {m?.baseSpd}</span>
+        </div>
+        <div style={{ fontSize: 8, color: "#888", marginBottom: 16 }}>
+          Collection: {journeyMythicals.length + 1}/7 mythicals
+          {journeyChapter < 6 && ` · Next: ${MYTHICAL_ORDER[journeyChapter + 1] === "mythdrake" ? "🐉 Final Boss!" : "???"}`}
+        </div>
+        <button onClick={() => {
+          const newCollection = [...journeyMythicals, m.id];
+          setJourneyMythicals(newCollection);
+          setJourneyBattle(0);
+          setJourneySwapsLeft(3);
+          const nr = generateJourneyRoster();
+          setJourneyRoster(nr);
+          if (newCollection.length >= 7) {
+            setJourneyChapter(7);
+            deleteSave("journey"); setHasSave(p => ({ ...p, journey: false }));
+            setScreen("journeyHub");
+          } else {
+            setJourneyChapter(newCollection.length);
+            setJourneyOpponent(generateFreeplayOpponent(newCollection.length * 8));
+            setScreen("journeyHub");
+          }
+        }} style={{
+          background: `linear-gradient(135deg, ${el.color}, ${el.color}cc)`, color: "#fff", border: "none", padding: "12px 36px",
+          borderRadius: 26, fontSize: 14, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase",
+          boxShadow: `0 4px 20px ${el.color}44`,
+        }}>{journeyMythicals.length + 1 >= 7 ? "Journey Complete!" : "Continue Journey"}</button>
+      </div>
+    );
+  }
+  if (screen === "postPartner") return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: BG, fontFamily: "'Cinzel', serif", color: "#fff", padding: 24, textAlign: "center" }}>{FL}{ST}<div style={{ fontSize: 40 }}>🎉</div><h2 style={{ fontSize: 18, fontWeight: 900, letterSpacing: 3, margin: "6px 0", color: "#f1c40f" }}>Adventure Begins!</h2><div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0 18px", padding: "8px 18px", background: "rgba(255,255,255,0.04)", borderRadius: 8, border: `1px solid ${ELEMENTS[partner?.element]?.color}33` }}><span style={{ fontSize: 32 }}>{partner?.emoji}</span><div><div style={{ fontSize: 12, fontWeight: 700 }}>{partner?.name}</div><div style={{ fontSize: 7, color: ELEMENTS[partner?.element]?.color }}>{ELEMENTS[partner?.element]?.icon} Your Partner</div></div></div><button onClick={() => setScreen("title")} style={{ background: "linear-gradient(135deg, #f1c40f, #e67e22)", color: "#1a0a2e", border: "none", padding: "10px 32px", borderRadius: 24, fontSize: 13, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>Continue</button></div>;
+
+  // ═══ JOURNEY SWAP SCREEN ═══
+  if (screen === "journeySwap") {
+    const tierPool = getJourneyTierPool();
+    const swapPool = allMonsters.filter(m => tierPool.includes(m.tier) && !journeyRoster.find(r => r.id === m.id));
+    const canSwap = journeySwapsLeft > 0 && journeyBattle % 2 === 0;
+    const tierC = { common: "#95a5a6", rare: "#9b59b6", mythical: "#f1c40f" };
+    const jd = getJourneyDiff();
+
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: 14 }}>
+        {FL}{ST}
+        <h2 style={{ textAlign: "center", fontSize: 16, fontWeight: 700, letterSpacing: 3, marginBottom: 2, background: "linear-gradient(135deg, #9b59b6, #8e44ad)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+          {canSwap ? "🔄 Swap Window" : "⚔️ Ready to Fight"}
+        </h2>
+        <p style={{ textAlign: "center", fontSize: 8, color: "#888", marginBottom: 4 }}>
+          Chapter {journeyChapter + 1} · Battle {journeyBattle + 1}/8 · {jd.icon} {jd.label}
+        </p>
+
+        {canSwap && (
+          <p style={{ textAlign: "center", fontSize: 9, color: "#f1c40f", marginBottom: 8 }}>
+            🔄 {journeySwapsLeft} swap{journeySwapsLeft !== 1 ? "s" : ""} remaining — tap a team slot, then pick a replacement
+          </p>
+        )}
+        {!canSwap && journeyBattle % 2 !== 0 && (
+          <p style={{ textAlign: "center", fontSize: 8, color: "#666", marginBottom: 8 }}>
+            No swaps this round. Next swap window: after battle {(Math.floor(journeyBattle / 2) + 1) * 2}
+          </p>
+        )}
+
+        {/* Current Team */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 8, color: "#9b59b6", letterSpacing: 2, marginBottom: 4, textAlign: "center" }}>YOUR TEAM</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            {journeyRoster.map((m, i) => {
+              const el = ELEMENTS[m.element];
+              const isSelected = journeySwapSlot === i;
+              return (
+                <div key={m.id + i} onClick={() => canSwap && setJourneySwapSlot(isSelected ? null : i)} style={{
+                  width: 110, padding: "8px 6px", borderRadius: 10, textAlign: "center", cursor: canSwap ? "pointer" : "default",
+                  background: isSelected ? "rgba(241,196,15,0.2)" : `${el.color}15`,
+                  border: `2px solid ${isSelected ? "#f1c40f" : el.color + "44"}`,
+                  boxShadow: isSelected ? "0 0 14px rgba(241,196,15,0.3)" : "none",
+                  transition: "all 0.2s",
+                }}>
+                  <div style={{ fontSize: 5, color: tierC[m.tier], textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>{m.tier}</div>
+                  <div style={{ fontSize: 28, marginBottom: 2 }}>{m.emoji}</div>
+                  <div style={{ fontSize: 9, fontWeight: 700 }}>{m.name}</div>
+                  <div style={{ fontSize: 6, color: el.color }}>{el.icon} {el.name} · {m.species}</div>
+                  <div style={{ fontSize: 6, color: "#aaa", fontFamily: "monospace", marginTop: 2 }}>HP:{m.baseHP} ATK:{m.baseAtk} DEF:{m.baseDef}</div>
+                  <div style={{ fontSize: 6, color: "#aaa", fontFamily: "monospace" }}>ACC:{m.baseAcc} SPD:{m.baseSpd} ⚡+{m.fpGen}</div>
+                  <div style={{ fontSize: 5, color: "#777", fontStyle: "italic", marginTop: 2 }}>{m.support.desc}</div>
+                  {isSelected && <div style={{ fontSize: 7, color: "#f1c40f", marginTop: 3, fontWeight: 700 }}>↕ SELECT REPLACEMENT ↕</div>}
+                  <div style={{ fontSize: 6, color: "#555", marginTop: 2 }}>{i === 0 ? "⚔️ AZ" : "🛡️ SZ"}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Swap Pool — only show when a slot is selected */}
+        {journeySwapSlot !== null && canSwap && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 7, color: "#f1c40f", letterSpacing: 2, marginBottom: 4, textAlign: "center" }}>
+              AVAILABLE ({swapPool.length}) — Tiers: {tierPool.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ")}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 4, maxHeight: 220, overflowY: "auto", padding: 2, scrollbarWidth: "thin" }}>
+              {swapPool.map(m => {
+                const el = ELEMENTS[m.element];
+                return (
+                  <div key={m.id} onClick={() => {
+                    const nr = [...journeyRoster]; nr[journeySwapSlot] = m;
+                    setJourneyRoster(nr); setJourneySwapsLeft(s => s - 1); setJourneySwapSlot(null);
+                  }} style={{
+                    padding: "5px 4px", borderRadius: 7, textAlign: "center", cursor: "pointer",
+                    background: "rgba(255,255,255,0.03)", border: `1px solid ${el.color}33`,
+                    transition: "all 0.2s",
+                  }}>
+                    <div style={{ fontSize: 5, color: tierC[m.tier], textTransform: "uppercase" }}>{m.tier}</div>
+                    <div style={{ fontSize: 18 }}>{m.emoji}</div>
+                    <div style={{ fontSize: 7, fontWeight: 700 }}>{m.name}</div>
+                    <div style={{ fontSize: 5, color: el.color }}>{el.icon} {m.species}</div>
+                    <div style={{ fontSize: 5, color: "#888", fontFamily: "monospace" }}>A:{m.baseAtk} D:{m.baseDef} S:{m.baseSpd}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Synergy check */}
+        {(() => {
+          const ft = journeyRoster.map(m => ({ ...m, alive: true, zone: "SZ" }));
+          const syn = detectSynergy(ft);
+          if (!syn) return journeyRoster.length === 3 ? <div style={{ textAlign: "center", fontSize: 7, color: "#555", marginBottom: 6 }}>No species synergy active</div> : null;
+          return <div style={{ textAlign: "center", margin: "0 auto 8px", padding: "5px 12px", background: "linear-gradient(90deg, rgba(241,196,15,0.08), rgba(241,196,15,0.03))", borderRadius: 7, border: "1px solid rgba(241,196,15,0.2)", maxWidth: 360 }}>
+            <div style={{ fontSize: 9, fontWeight: 900, color: "#f1c40f", letterSpacing: 1 }}>{syn.synergy.emoji} {syn.synergy.name}!</div>
+            <div style={{ fontSize: 6, color: "#aaa", fontStyle: "italic" }}>{syn.synergy.passive.desc}</div>
+          </div>;
+        })()}
+
+        {/* Speed + Fight */}
+        {journeyRoster.length > 0 && <div style={{ textAlign: "center", marginBottom: 6 }}><span style={{ fontSize: 8, color: "#2ecc71", fontFamily: "monospace", padding: "2px 8px", background: "rgba(46,204,113,0.1)", borderRadius: 5, border: "1px solid rgba(46,204,113,0.2)" }}>💨 Team Speed: {journeyRoster.reduce((s, m) => s + m.baseSpd, 0)} — determines turn order</span></div>}
+        <div style={{ textAlign: "center", display: "flex", gap: 6, justifyContent: "center" }}>
+          <button onClick={() => { confirmTeam(); }} style={{
+            background: "linear-gradient(135deg, #9b59b6, #8e44ad)", color: "#fff", border: "none", padding: "10px 32px",
+            borderRadius: 20, fontSize: 12, fontFamily: "'Cinzel', serif", fontWeight: 900, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase",
+          }}>⚔️ Fight!</button>
+          <button onClick={() => setScreen("journeyHub")} style={{
+            background: "none", border: "1px solid rgba(255,255,255,0.1)", color: "#888",
+            padding: "10px 14px", borderRadius: 20, fontSize: 9, cursor: "pointer",
+          }}>← Hub</button>
+          <button onClick={() => setShowChart(true)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, color: "#888", padding: "10px 12px", fontSize: 9, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>📊 Elements</button>
+        </div>
+        {showChart && <ElementChart onClose={() => setShowChart(false)} />}
+      </div>
+    );
+  }
+
+  if (screen === "teamSelect") {
+    const ed = gameMode === "tournament" ? bracket[currentBattle] : null;
+    const tierC = { common: "#95a5a6", rare: "#9b59b6", mythical: "#f1c40f" };
+    const speciesList = [...new Set(allMonsters.map(m => m.species))];
+    const elementList = Object.keys(ELEMENTS);
+    const tierList = ["common", "rare", "mythical"];
+
+    // Filter logic
+    let filtered = allMonsters;
+    if (filterElement !== "all") filtered = filtered.filter(m => m.element === filterElement);
+    if (filterSpecies !== "all") filtered = filtered.filter(m => m.species === filterSpecies);
+    if (filterTier !== "all") filtered = filtered.filter(m => m.tier === filterTier);
+
+    // Sort
+    const sortFns = {
+      species: (a, b) => (a.species || "").localeCompare(b.species || "") || tierList.indexOf(a.tier) - tierList.indexOf(b.tier),
+      element: (a, b) => a.element.localeCompare(b.element) || a.name.localeCompare(b.name),
+      tier: (a, b) => tierList.indexOf(a.tier) - tierList.indexOf(b.tier) || a.name.localeCompare(b.name),
+      atk: (a, b) => b.baseAtk - a.baseAtk,
+      def: (a, b) => b.baseDef - a.baseDef,
+      spd: (a, b) => b.baseSpd - a.baseSpd,
+      hp: (a, b) => b.baseHP - a.baseHP,
+    };
+    filtered = [...filtered].sort(sortFns[sortBy] || sortFns.species);
+
+    // Synergy preview
+    const fakeTeam = selectedRoster.map(m => ({ ...m, alive: true, zone: "SZ" }));
+    const syn = detectSynergy(fakeTeam);
+
+    const FilterPill = ({ active, onClick, children, color = "#888" }) => (
+      <button onClick={onClick} style={{
+        background: active ? `${color}25` : "rgba(255,255,255,0.03)",
+        border: `1px solid ${active ? `${color}88` : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 12, padding: "3px 8px", fontSize: 7, cursor: "pointer",
+        color: active ? color : "#666", fontFamily: "'Cinzel', serif",
+        transition: "all 0.2s", whiteSpace: "nowrap",
+      }}>{children}</button>
+    );
+
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(180deg, #0a0a1a 0%, #1a1a2e 50%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: "12px 10px" }}>
+        {FL}{ST}
+        <h2 style={{ textAlign: "center", fontSize: 17, fontWeight: 700, letterSpacing: 3, marginBottom: 2, background: "linear-gradient(90deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Choose Your Team</h2>
+        <p style={{ textAlign: "center", fontSize: 8, color: "#888", marginBottom: 8 }}>
+          {gameMode === "tournament" ? `${ed?.name}: vs ${ed?.trainer}` : currentOpponent ? `vs ${currentOpponent.trainer} — ${currentOpponent.title}` : `Battle ${currentBattle + 1}`}
+        </p>
+
+        {/* Selected Team Preview */}
+        <div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center", marginBottom: 8, minHeight: 44, padding: "6px 10px", background: "rgba(0,0,0,0.25)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
+          {selectedRoster.length === 0 && <span style={{ fontSize: 8, color: "#555" }}>Select 1-3 monsters below. First = ⚔️AZ, rest = 🛡️SZ</span>}
+          {selectedRoster.map((m, i) => {
+            const el = ELEMENTS[m.element];
+            return (
+              <div key={m.id} onClick={() => toggleRoster(m)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: `${el.color}22`, borderRadius: 8, border: `1px solid ${el.color}44`, cursor: "pointer" }}>
+                <span style={{ fontSize: 16 }}>{m.emoji}</span>
+                <div>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: "#fff" }}>{m.name}</div>
+                  <div style={{ fontSize: 6, color: el.color }}>{i === 0 ? "⚔️ AZ" : "🛡️ SZ"} · {m.species}</div>
+                </div>
+                <span style={{ fontSize: 10, color: "#e74c3c88", marginLeft: 2 }}>✕</span>
+              </div>
+            );
+          })}
+          {selectedRoster.length > 0 && selectedRoster.length < 3 && <span style={{ fontSize: 7, color: "#555" }}>+{3 - selectedRoster.length} more</span>}
+          {selectedRoster.length > 0 && <div style={{ fontSize: 7, color: "#2ecc71", fontFamily: "monospace", marginLeft: 4, padding: "2px 6px", background: "rgba(46,204,113,0.1)", borderRadius: 5, border: "1px solid rgba(46,204,113,0.2)", whiteSpace: "nowrap" }}>💨 SPD: {selectedRoster.reduce((s, m) => s + m.baseSpd, 0)}</div>}
+        </div>
+
+        {/* Synergy Preview */}
+        {syn && (
+          <div style={{ textAlign: "center", margin: "0 auto 8px", padding: "5px 12px", background: "linear-gradient(90deg, rgba(241,196,15,0.08), rgba(241,196,15,0.03))", borderRadius: 8, border: "1px solid rgba(241,196,15,0.2)", maxWidth: 400 }}>
+            <div style={{ fontSize: 9, fontWeight: 900, color: "#f1c40f", letterSpacing: 1 }}>{syn.synergy.emoji} {syn.synergy.name} ACTIVE!</div>
+            <div style={{ fontSize: 6, color: "#ccc" }}>Ultimate: <b style={{ color: "#fff" }}>{syn.synergy.ultimate.name}</b> (P:{syn.synergy.ultimate.power} ⚡{syn.synergy.ultimate.fp} 🎯100%)</div>
+            <div style={{ fontSize: 6, color: "#aaa", fontStyle: "italic" }}>{syn.synergy.passive.desc}</div>
+          </div>
+        )}
+        {!syn && selectedRoster.length === 3 && <div style={{ textAlign: "center", fontSize: 7, color: "#666", marginBottom: 6 }}>No synergy — pick all 3 tiers of one species for an ultimate!</div>}
+
+        {/* Filter Bar */}
+        <div style={{ marginBottom: 6, padding: "6px 8px", background: "rgba(0,0,0,0.2)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.04)" }}>
+          {/* Species Filter */}
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ fontSize: 7, color: "#888", letterSpacing: 1, marginRight: 6 }}>SPECIES:</span>
+            <div style={{ display: "inline-flex", gap: 3, flexWrap: "wrap" }}>
+              <FilterPill active={filterSpecies === "all"} onClick={() => setFilterSpecies("all")} color="#f1c40f">All</FilterPill>
+              {speciesList.map(sp => <FilterPill key={sp} active={filterSpecies === sp} onClick={() => setFilterSpecies(filterSpecies === sp ? "all" : sp)} color="#f1c40f">{sp}</FilterPill>)}
+            </div>
+          </div>
+          {/* Element Filter */}
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ fontSize: 7, color: "#888", letterSpacing: 1, marginRight: 6 }}>ELEMENT:</span>
+            <div style={{ display: "inline-flex", gap: 3, flexWrap: "wrap" }}>
+              <FilterPill active={filterElement === "all"} onClick={() => setFilterElement("all")} color="#aaa">All</FilterPill>
+              {elementList.map(el => <FilterPill key={el} active={filterElement === el} onClick={() => setFilterElement(filterElement === el ? "all" : el)} color={ELEMENTS[el].color}>{ELEMENTS[el].icon} {ELEMENTS[el].name}</FilterPill>)}
+            </div>
+          </div>
+          {/* Tier Filter */}
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ fontSize: 7, color: "#888", letterSpacing: 1, marginRight: 6 }}>TIER:</span>
+            <div style={{ display: "inline-flex", gap: 3, flexWrap: "wrap" }}>
+              <FilterPill active={filterTier === "all"} onClick={() => setFilterTier("all")} color="#aaa">All</FilterPill>
+              {tierList.map(t => <FilterPill key={t} active={filterTier === t} onClick={() => setFilterTier(filterTier === t ? "all" : t)} color={tierC[t]}>{t.charAt(0).toUpperCase() + t.slice(1)}</FilterPill>)}
+            </div>
+          </div>
+          {/* Sort */}
+          <div>
+            <span style={{ fontSize: 7, color: "#888", letterSpacing: 1, marginRight: 6 }}>SORT:</span>
+            <div style={{ display: "inline-flex", gap: 3, flexWrap: "wrap" }}>
+              {[["species","Species"],["element","Element"],["tier","Tier"],["atk","ATK"],["def","DEF"],["spd","SPD"],["hp","HP"]].map(([k,l]) => (
+                <FilterPill key={k} active={sortBy === k} onClick={() => setSortBy(k)} color="#5dade2">{l}</FilterPill>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Results count */}
+        <div style={{ fontSize: 7, color: "#666", marginBottom: 4, paddingLeft: 4 }}>
+          Showing {filtered.length} of {allMonsters.length} monsters
+        </div>
+
+        {/* Monster Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 6, maxWidth: 680, margin: "0 auto 10px", maxHeight: 320, overflowY: "auto", padding: "2px", scrollbarWidth: "thin" }}>
+          {filtered.map(m => {
+            const s = selectedRoster.find(x => x.id === m.id);
+            const si = selectedRoster.findIndex(x => x.id === m.id);
+            const el = ELEMENTS[m.element];
+            const full = selectedRoster.length >= 3 && !s;
+            return (
+              <div key={m.id} onClick={() => !full && toggleRoster(m)} style={{
+                background: s ? `linear-gradient(135deg, ${el.color}33, ${el.color}55)` : "rgba(255,255,255,0.03)",
+                border: `2px solid ${s ? el.color : "rgba(255,255,255,0.08)"}`,
+                borderRadius: 8, padding: "7px 6px", cursor: full ? "not-allowed" : "pointer",
+                position: "relative", transition: "all 0.2s", opacity: full ? 0.4 : 1,
+                boxShadow: s ? `0 0 10px ${el.color}22` : "none",
+              }}>
+                {s && <div style={{ position: "absolute", top: -4, right: -4, background: si === 0 ? "#e74c3c" : "#3498db", color: "#fff", width: 14, height: 14, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6, fontWeight: 700 }}>{si === 0 ? "AZ" : "SZ"}</div>}
+                <div style={{ position: "absolute", top: 3, left: 3, background: tierC[m.tier], color: "#fff", fontSize: 5, padding: "0px 3px", borderRadius: 2, textTransform: "uppercase" }}>{m.tier}</div>
+                <div style={{ textAlign: "center", fontSize: 22, marginBottom: 1, marginTop: 2 }}>{m.emoji}</div>
+                <div style={{ textAlign: "center", fontSize: 9, fontWeight: 700, marginBottom: 1, lineHeight: 1.1 }}>{m.name}</div>
+                <div style={{ textAlign: "center", fontSize: 6, color: el.color, marginBottom: 2 }}>{el.icon} {el.name} · {m.species}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0px 4px", fontSize: 6, fontFamily: "monospace", color: "#aaa", lineHeight: 1.3 }}>
+                  <span>HP:{m.baseHP}</span><span>ATK:{m.baseAtk}</span>
+                  <span>DEF:{m.baseDef}</span><span>ACC:{m.baseAcc}</span>
+                  <span>SPD:{m.baseSpd}</span><span style={{ color: "#5dade2" }}>⚡+{m.fpGen}</span>
+                </div>
+                <div style={{ fontSize: 5, color: "#666", textAlign: "center", marginTop: 2, fontStyle: "italic" }}>{m.support.desc}</div>
+              </div>
+            );
+          })}
+          {filtered.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 20, color: "#555", fontSize: 10 }}>No monsters match these filters</div>}
+        </div>
+
+        {/* Deploy + Back */}
+        <div style={{ textAlign: "center", display: "flex", gap: 6, justifyContent: "center", marginBottom: 6 }}>
+          <button onClick={confirmTeam} disabled={selectedRoster.length < 1} style={{
+            background: selectedRoster.length >= 1 ? "linear-gradient(135deg, #e74c3c, #c0392b)" : "rgba(255,255,255,0.1)",
+            color: selectedRoster.length >= 1 ? "#fff" : "#666", border: "none", padding: "9px 28px", borderRadius: 18,
+            fontSize: 12, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2,
+            cursor: selectedRoster.length >= 1 ? "pointer" : "not-allowed", textTransform: "uppercase",
+          }}>Deploy ({selectedRoster.length}/3)</button>
+          <button onClick={() => setScreen(gameMode === "tournament" ? "tournamentHub" : gameMode === "journey" ? "journeyHub" : "title")} style={{
+            background: "none", border: "1px solid rgba(255,255,255,0.1)", color: "#888",
+            padding: "9px 14px", borderRadius: 18, fontSize: 9, cursor: "pointer",
+          }}>← Back</button>
+          <button onClick={() => setShowChart(true)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 18, color: "#888", padding: "9px 12px", fontSize: 9, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>📊 Elements</button>
+        </div>
+
+        {/* How to Play */}
+        <div style={{ maxWidth: 460, margin: "0 auto", padding: 10, background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)" }}>
+          <h3 style={{ fontSize: 8, letterSpacing: 2, color: "#f1c40f", marginBottom: 4 }}>QUICK GUIDE</h3>
+          <div style={{ fontSize: 7, color: "#999", lineHeight: 1.5 }}>
+            <b style={{ color: "#e74c3c" }}>⚔️AZ</b> attacks & gets hit · <b style={{ color: "#3498db" }}>🛡️SZ</b> buffs AZ & generates FP · <b style={{ color: "#9b59b6" }}>💤PZ</b> safe {PZ_DURATION} turns (⚡{PROTECT_COST})
+            <br /><b style={{ color: "#fff" }}>Stats:</b> <span style={{ color: "#e74c3c" }}>ATK</span>→damage · <span style={{ color: "#3498db" }}>DEF</span>→reduction · <span style={{ color: "#e8a" }}>ACC</span>→hit% · <span style={{ color: "#2ecc71" }}>SPD</span>→dodge
+            <br />Pick all 3 tiers of one <b style={{ color: "#f1c40f" }}>species</b> for a synergy ultimate! Multi-action turns — spend FP freely, then End Turn.
+          </div>
+        </div>
+        {showChart && <ElementChart onClose={() => setShowChart(false)} />}
+      </div>
+    );
+  }
+
+  // ═══ BATTLE ═══
+  const activePlayer = getAZ(playerTeam);
+  const currEnemy = gameMode === "tournament" ? (bracket[currentBattle] || null) : gameMode === "journey" ? journeyOpponent : currentOpponent;
+  const playerFPGen = calcTeamFPGen(playerTeam);
+  const di = DIFF[difficulty] || DIFF.normal;
+  const cancelAll = () => { setSelectingTarget(false); setSelectingRotate(false); setSelectingProtect(false); setSelectedAction(null); };
+
+  // Sort teams for display: AZ first, then SZ, then PZ
+  const sortTeam = (t) => { const order = { AZ: 0, SZ: 1, PZ: 2 }; return [...t].sort((a, b) => (order[a.zone] || 1) - (order[b.zone] || 1)); };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(180deg, #0c0c1d 0%, #1a1028 30%, #12182a 70%, #0c0c1d 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: "8px 6px", display: "flex", flexDirection: "column", gap: 6 }}>
+      {FL}{ST}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", background: "rgba(0,0,0,0.3)", borderRadius: 7, border: "1px solid rgba(255,255,255,0.05)", flexWrap: "wrap", gap: 4 }}>
+        <span style={{ fontSize: 8, color: "#888", letterSpacing: 1 }}>{gameMode === "tournament" ? currEnemy?.label : `B${currentBattle + 1}`} T{turnNum}</span>
+        <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 5, background: `${di.color}22`, color: di.color, border: `1px solid ${di.color}44` }}>{di.icon} {di.label}</span>
+        <span style={{ fontSize: 8, color: "#f1c40f", fontWeight: 700 }}>{currEnemy?.trainer || `Wins: ${wins}`}</span>
+        <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 6, background: turn === "player" ? "rgba(46,204,113,0.2)" : "rgba(231,76,60,0.2)", color: turn === "player" ? "#2ecc71" : "#e74c3c" }}>{animating && turn !== "player" ? "Enemy..." : animating ? "..." : "Your Turn"}</span>
+        <button onClick={() => setShowChart(true)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 5, color: "#888", padding: "2px 6px", fontSize: 8, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>📊</button>
+      </div>
+      {gameMode === "tournament" && <TournamentBracket currentRound={currentBattle} results={tournamentResults} bracket={bracket} />}
+
+      {/* Enemy */}
+      <TeamFPBar current={enemyFP} max={MAX_FP} gen={Math.floor(calcTeamFPGen(enemyTeam) * di.enemyFPGenMult)} />
+      <div>
+        <div style={{ fontSize: 7, color: "#e74c3c", letterSpacing: 2, marginBottom: 3, paddingLeft: 3 }}>OPPONENT</div>
+        <div style={{ display: "flex", gap: 5, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap" }}>
+          {sortTeam(enemyTeam).map((m, i) => { const ri = enemyTeam.indexOf(m); return <div key={ri} onClick={() => selectingTarget && m.alive && m.zone !== "PZ" && handleTargetSelect(ri)} style={{ cursor: selectingTarget && m.alive && m.zone !== "PZ" ? "pointer" : "default", outline: selectingTarget && m.alive && m.zone !== "PZ" ? "2px dashed #e74c3c" : "none", outlineOffset: 2, borderRadius: 12 }}><ZoneSlot monster={m} zone={m.zone} isEnemy shaking={shakeId === `enemy-${ri}`} /></div>; })}
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.06)", letterSpacing: 6 }}>⚔️</div>
+
+      {/* Player */}
+      <TeamFPBar current={playerFP} max={MAX_FP} gen={playerFPGen} />
+      <div>
+        <div style={{ fontSize: 7, color: "#2ecc71", letterSpacing: 2, marginBottom: 3, paddingLeft: 3 }}>YOUR TEAM</div>
+        <div style={{ display: "flex", gap: 5, justifyContent: "center", alignItems: "flex-start", flexWrap: "wrap" }}>
+          {sortTeam(playerTeam).map((m, i) => { const ri = playerTeam.indexOf(m); return <div key={ri}><ZoneSlot monster={m} zone={m.zone} shaking={shakeId === `player-${ri}`}
+            onClick={selectingRotate && m.alive && m.zone === "SZ" ? () => handleRotate(ri) : selectingProtect && m.alive && m.zone !== "PZ" ? () => handleProtect(ri) : undefined}
+            highlight={(selectingRotate && m.alive && m.zone === "SZ") || (selectingProtect && m.alive && m.zone !== "PZ")} /></div>; })}
+        </div>
+      </div>
+
+      {/* Actions */}
+      {!battleResult && activePlayer?.alive && turn === "player" && (
+        <div style={{ background: "rgba(0,0,0,0.4)", borderRadius: 9, border: "1px solid rgba(255,255,255,0.08)", padding: 7 }}>
+          {selectingTarget && <div style={{ textAlign: "center", fontSize: 9, color: "#e74c3c", marginBottom: 5, animation: "flash 1s infinite" }}>🎯 Select target (PZ monsters are safe!)</div>}
+          {selectingRotate && <div style={{ textAlign: "center", fontSize: 9, color: "#f1c40f", marginBottom: 5 }}>🔄 Select SZ monster → AZ (⚡{ROTATE_COST})</div>}
+          {selectingProtect && <div style={{ textAlign: "center", fontSize: 9, color: "#9b59b6", marginBottom: 5 }}>💤 Select monster to protect for {PZ_DURATION} turns (⚡{PROTECT_COST})</div>}
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(activePlayer.skills.length, 4)}, 1fr)`, gap: 4, marginBottom: 5 }}>
+            {activePlayer.skills.map((skill, i) => { const el = ELEMENTS[skill.element] || { color: "#888", icon: "" }; const ok = playerFP >= skill.fp && !animating && !selectingRotate && !selectingProtect; return <button key={i} onClick={() => ok && handleSkillClick(skill)} disabled={!ok} style={{ background: ok ? `linear-gradient(135deg, ${el.color}22, ${el.color}44)` : "rgba(0,0,0,0.3)", border: `1px solid ${ok ? el.color + "66" : "rgba(255,255,255,0.05)"}`, borderRadius: 6, padding: "5px 4px", cursor: ok ? "pointer" : "not-allowed", color: ok ? "#fff" : "#555", textAlign: "left" }}><div style={{ fontSize: 8, fontWeight: 700, fontFamily: "'Cinzel', serif" }}>{el.icon} {skill.name}</div><div style={{ fontSize: 6, color: ok ? "#aaa" : "#444", fontFamily: "monospace" }}>{skill.power > 0 ? `P:${skill.power}` : "BUFF"} ⚡{skill.fp}{skill.accuracy && skill.accuracy < 100 ? ` 🎯${skill.accuracy}%` : ""} {skill.target === "all" ? "AOE" : skill.target === "self" || skill.target === "team" ? "SELF" : "1v1"}</div></button>; })}
+          </div>
+          {(() => { const syn = detectSynergy(playerTeam); if (!syn) return null; const ult = syn.synergy.ultimate; const el = ELEMENTS[ult.element] || { color: "#f1c40f", icon: "🌟" }; const canUlt = playerFP >= ult.fp && !animating && !selectingRotate && !selectingProtect && !selectingTarget; return <div style={{ marginBottom: 5 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, padding: "3px 8px", background: "linear-gradient(90deg, rgba(241,196,15,0.1), rgba(241,196,15,0.05))", borderRadius: 6, border: "1px solid rgba(241,196,15,0.2)" }}>
+              <span style={{ fontSize: 10 }}>{syn.synergy.emoji}</span>
+              <span style={{ fontSize: 7, color: "#f1c40f", fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 1 }}>{syn.synergy.name}</span>
+              <span style={{ fontSize: 6, color: "#aaa", fontStyle: "italic", marginLeft: "auto" }}>{syn.synergy.passive.desc}</span>
+            </div>
+            <button onClick={canUlt ? handleUltimate : undefined} disabled={!canUlt} style={{
+              width: "100%", background: canUlt ? `linear-gradient(135deg, ${el.color}33, #f1c40f33, ${el.color}33)` : "rgba(0,0,0,0.3)",
+              border: `2px solid ${canUlt ? "#f1c40f88" : "rgba(255,255,255,0.05)"}`, borderRadius: 8, padding: "6px 8px",
+              cursor: canUlt ? "pointer" : "not-allowed", color: canUlt ? "#f1c40f" : "#555", textAlign: "center",
+              boxShadow: canUlt ? "0 0 12px rgba(241,196,15,0.15)" : "none",
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 900, fontFamily: "'Cinzel', serif", letterSpacing: 1 }}>🌟 {ult.name}</div>
+              <div style={{ fontSize: 6, color: canUlt ? "#ccc" : "#444", fontFamily: "monospace" }}>P:{ult.power} ⚡{ult.fp} 🎯100% GUARANTEED HIT • ALL ENEMIES</div>
+              <div style={{ fontSize: 6, color: canUlt ? "#aaa" : "#333", fontStyle: "italic", marginTop: 1 }}>{ult.desc}</div>
+            </button>
+          </div>; })()}
+          <div style={{ display: "flex", gap: 5, justifyContent: "center", flexWrap: "wrap" }}>
+            {playerTeam.filter(m => m.alive && m.zone === "SZ").length > 0 && !selectingTarget && !selectingProtect && <button onClick={() => { cancelAll(); setSelectingRotate(!selectingRotate); }} disabled={animating || playerFP < ROTATE_COST} style={{ background: selectingRotate ? "rgba(241,196,15,0.2)" : "rgba(255,255,255,0.05)", border: `1px solid ${selectingRotate ? "#f1c40f66" : "rgba(255,255,255,0.1)"}`, borderRadius: 5, color: playerFP >= ROTATE_COST ? "#aaa" : "#555", padding: "3px 10px", fontSize: 8, cursor: playerFP >= ROTATE_COST ? "pointer" : "not-allowed", fontFamily: "'Cinzel', serif" }}>🔄 Rotate ⚡{ROTATE_COST}</button>}
+            {playerTeam.filter(m => m.alive && m.zone !== "PZ").length > 1 && !selectingTarget && !selectingRotate && <button onClick={() => { cancelAll(); setSelectingProtect(!selectingProtect); }} disabled={animating || playerFP < PROTECT_COST} style={{ background: selectingProtect ? "rgba(155,89,182,0.2)" : "rgba(255,255,255,0.05)", border: `1px solid ${selectingProtect ? "#9b59b688" : "rgba(255,255,255,0.1)"}`, borderRadius: 5, color: playerFP >= PROTECT_COST ? "#c39bd3" : "#555", padding: "3px 10px", fontSize: 8, cursor: playerFP >= PROTECT_COST ? "pointer" : "not-allowed", fontFamily: "'Cinzel', serif" }}>💤 Protect ⚡{PROTECT_COST}</button>}
+            {!selectingTarget && !selectingRotate && !selectingProtect && <button onClick={handleEndTurn} disabled={animating} style={{ background: "linear-gradient(135deg, rgba(46,204,113,0.2), rgba(46,204,113,0.35))", border: "1px solid rgba(46,204,113,0.5)", borderRadius: 5, color: "#2ecc71", padding: "3px 12px", fontSize: 8, cursor: "pointer", fontFamily: "'Cinzel', serif", fontWeight: 700 }}>⏭️ End Turn{actionsThisTurn > 0 ? ` (${actionsThisTurn})` : ""}</button>}
+            {(selectingTarget || selectingRotate || selectingProtect) && <button onClick={cancelAll} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 5, color: "#888", padding: "3px 10px", fontSize: 8, cursor: "pointer", fontFamily: "'Cinzel', serif" }}>Cancel</button>}
+          </div>
+        </div>
+      )}
+      {battleResult && <div style={{ textAlign: "center", padding: 14, background: battleResult === "win" ? "linear-gradient(135deg, rgba(46,204,113,0.15), rgba(241,196,15,0.15))" : "linear-gradient(135deg, rgba(231,76,60,0.15), rgba(142,68,173,0.15))", borderRadius: 9, border: `1px solid ${battleResult === "win" ? "#2ecc7133" : "#e74c3c33"}` }}><div style={{ fontSize: 26, marginBottom: 5 }}>{battleResult === "win" ? "🏆" : "💀"}</div><div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 3, color: battleResult === "win" ? "#f1c40f" : "#e74c3c", marginBottom: 4 }}>{battleResult === "win" ? "VICTORY!" : "DEFEATED"}</div>{gameMode === "tournament" && battleResult === "win" && currentBattle >= bracket.length - 1 && <div style={{ fontSize: 9, color: "#f1c40f", marginBottom: 6 }}>🏆 Tournament Complete!</div>}{gameMode === "journey" && battleResult === "win" && journeyBattle >= 7 && <div style={{ fontSize: 9, color: "#9b59b6", marginBottom: 6 }}>✨ Mythical fossil excavated!</div>}{gameMode === "journey" && battleResult === "win" && journeyBattle < 7 && <div style={{ fontSize: 8, color: "#aaa", marginBottom: 4 }}>Battle {journeyBattle + 1}/8 complete</div>}<button onClick={handleBattleEnd} style={{ background: "linear-gradient(135deg, #e74c3c, #c0392b)", color: "#fff", border: "none", padding: "8px 24px", borderRadius: 16, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>{gameMode === "journey" ? (battleResult === "win" ? (journeyBattle >= 7 ? "🎁 Claim Fossil" : `Battle ${journeyBattle + 2}/8 →`) : "Retry") : gameMode === "tournament" ? (battleResult === "win" ? (currentBattle >= bracket.length - 1 ? "🎁 Claim" : "Next →") : "Retry") : (battleResult === "win" ? "Next →" : "Retry")}</button></div>}
+      <BattleLog log={battleLog} />
+      {showChart && <ElementChart onClose={() => setShowChart(false)} />}
+    </div>
+  );
+}
+
+// Mount the app
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MythicFossils));
+  </script>
+</body>
+</html>
