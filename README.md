@@ -4,8 +4,6 @@ A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and colle
 
 ## 🎮 [Play Now](https://voidzz-exe.github.io/mythic-fossils/)
 
-4. Wait 1-2 minutes, then visit `https://YOUR_USERNAME.github.io/mythic-fossils/`
-
 ## Features
 
 - **35 monsters** across 7 species families with 6 elements
