@@ -1,6 +1,8 @@
 # 🐉 MYTHIC FOSSILS
 
-A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and collect mythical creatures. [WORK IN PROGRESS] [JUST A SYSTEM TEST NOT ACTUAL GAMEPLAY]
+A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and collect mythical creatures. 
+[WORK IN PROGRESS] 
+[JUST A SYSTEM TEST NOT ACTUAL GAMEPLAY]
 
 ## 🎮 [Play Now](https://voidzz-exe.github.io/mythic-fossils/)
 
