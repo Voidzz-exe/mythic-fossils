@@ -1,16 +1,9 @@
 # 🐉 Mythic Fossils
 
-A turn-based battle game inspired by Fossil Fighters. Revive ancient fossils, build teams of 3, and collect all 7 mythical creatures.
+A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and collect mythical creatures. [WORK IN PROGRESS] [JUST A SYSTEM TEST NOT ACTUAL GAMEPLAY]
 
-## 🎮 [Play Now](https://YOUR_USERNAME.github.io/mythic-fossils/)
+## 🎮 [Play Now](https://voidzz-exe.github.io/mythic-fossils/)
 
-> Replace `YOUR_USERNAME` with your GitHub username.
-
-## How to Deploy
-
-1. Create a new repository on GitHub called `mythic-fossils`
-2. Upload `index.html` and this `README.md` to the repo
-3. Go to **Settings** → **Pages** → set Source to **Deploy from a branch** → select **main** / **(root)** → **Save**
 4. Wait 1-2 minutes, then visit `https://YOUR_USERNAME.github.io/mythic-fossils/`
 
 ## Features
@@ -26,6 +19,50 @@ A turn-based battle game inspired by Fossil Fighters. Revive ancient fossils, bu
 - **Save system** — auto-saves progress
 - **Tutorial** — 8-page interactive guide for new players
 - **Element chart** — in-battle reference
+
+## In Detail ^
+build strategic teams of 3, and battle through tournaments and a full journey mode to collect all 7 mythical creatures.
+
+- **Zone Positioning** — Attack Zone (front fighter), Support Zone (passive buffs + FP gen), Protection Zone (invulnerable for 2 turns)
+- **Multi-Action Turns** — Spend FP on multiple attacks, buffs, rotations, and protections per turn
+- **4-Stat System** — ATK, DEF, ACC (accuracy), SPD (dodge + turn order)
+- **Speed Priority** — Team total SPD determines who strikes first each battle
+- **6 Elements** — Fire → Earth → Wind → Water cycle + Shadow ↔ Light mutual weakness
+
+
+### Status Effects & Buffs
+- 🔥 **Burn** — 8% max HP damage/turn (2 turns)
+- 🟢 **Poison** — 6% max HP damage/turn (3 turns)
+- ⚡ **Stun** — Skip entire turn (1 turn)
+- 🔰 **Shield** — 30% damage reduction (2 turns)
+- All buffs/debuffs expire after 2 turns with visual indicators
+
+
+
+| Species | Elements | Role |
+|---------|----------|------|
+| 🐉 Drake | Fire, Shadow, Earth | ATK powerhouses |
+| 🐋 Leviathan | Water, Wind, Shadow | DEF tanks |
+| 🦅 Raptor | Wind, Fire, Light | SPD/ACC strikers |
+| 🐢 Golem | Earth, Water, Fire | HP/DEF walls |
+| 🦇 Phantom | Shadow, Wind, Water | Drain/evasion |
+| 🦁 Celestial | Light, Earth, Wind | Healers/support |
+| 🐛 Insect | Earth, Fire, Wind, Shadow, Light | FP gen/debuffs |
+
+
+### Species Synergy System
+Pick all 3 tiers (Common + Rare + Mythical) of one species to unlock:
+- **Passive team buff** (always active)
+- **Ultimate Move** — 100% guaranteed hit AOE with massive power
+
+### Playable Modes to get a Feel
+These modes will allow you to sink your teeth into the system
+
+**🏆 Tournament** — 4-round randomized bracket with chosen difficulty. Win all 4 to earn a partner monster.
+
+**🗺️ Journey** — Collect all 7 mythical fossils across 7 chapters (8 battles each). Start with 3 random commons, earn swap windows every 2 battles. AI difficulty scales with your collection. Rares unlock at 2 mythicals, Mythicals at 5.
+
+**⚔️ Free Battle** — Endless fights with chosen difficulty and full team selection.
 
 ## License
 
