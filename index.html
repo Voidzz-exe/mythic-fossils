@@ -4,13 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#0a0a1a" />
-  <meta name="description" content="Mythic Fossils — A turn-based battle game." />
   <title>Mythic Fossils</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a1a; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
-    #root { min-height: 100vh; }
-  </style>
+  <style>* { margin: 0; padding: 0; box-sizing: border-box; } body { background: #0a0a1a; overflow-x: hidden; -webkit-font-smoothing: antialiased; } #root { min-height: 100vh; }</style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
@@ -18,14 +13,7 @@
 <body>
   <div id="root"></div>
   <script>
-    if (!window.storage) {
-      window.storage = {
-        async get(key) { const v = localStorage.getItem('mf:'+key); return v !== null ? {key, value: v, shared: false} : null; },
-        async set(key, value) { localStorage.setItem('mf:'+key, value); return {key, value, shared: false}; },
-        async delete(key) { localStorage.removeItem('mf:'+key); return {key, deleted: true, shared: false}; },
-        async list(prefix) { const keys=[]; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(k.startsWith('mf:'+(prefix||''))) keys.push(k.replace('mf:',''));} return {keys, prefix, shared: false}; },
-      };
-    }
+    if(!window.storage){window.storage={async get(k){const v=localStorage.getItem('mf:'+k);return v!==null?{key:k,value:v,shared:false}:null},async set(k,v){localStorage.setItem('mf:'+k,v);return{key:k,value:v,shared:false}},async delete(k){localStorage.removeItem('mf:'+k);return{key:k,deleted:true,shared:false}},async list(p){const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('mf:'+(p||'')))keys.push(k.replace('mf:',''))}return{keys,prefix:p,shared:false}}};}
   </script>
   <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
@@ -179,7 +167,7 @@ const MONSTERS = {
     support: { type: "fpBoost", value: 10, desc: "Team FP +10/turn" } },
 };
 
-// ═══ SPECIES SYNERGY: Full trio (common+rare+mythical) unlocks ultimate + passive ═══
+// ═══ SPECIES SYNERGY: 3 monsters of same species unlocks ultimate + passive ═══
 const SPECIES_SYNERGY = {
   Drake: {
     name: "Infernal Convergence", emoji: "🔥🐉🔥", element: "FIRE",
@@ -218,16 +206,15 @@ const SPECIES_SYNERGY = {
   },
 };
 
-// Detect if a team has full species synergy (all 3 tiers of one species)
+// Detect if a team has species synergy (3 monsters of same species)
 function detectSynergy(team) {
-  const speciesTiers = {};
+  const speciesCount = {};
   team.forEach(m => {
     if (!m.alive || !m.species) return;
-    if (!speciesTiers[m.species]) speciesTiers[m.species] = new Set();
-    speciesTiers[m.species].add(m.tier);
+    speciesCount[m.species] = (speciesCount[m.species] || 0) + 1;
   });
-  for (const [species, tiers] of Object.entries(speciesTiers)) {
-    if (tiers.has("common") && tiers.has("rare") && tiers.has("mythical")) {
+  for (const [species, count] of Object.entries(speciesCount)) {
+    if (count >= 3 && SPECIES_SYNERGY[species]) {
       return { species, synergy: SPECIES_SYNERGY[species] };
     }
   }
@@ -267,7 +254,17 @@ function generateOpponent(round, totalRounds) {
   else pool = ALL_MONSTERS_LIST;
 
   // Pick random monsters ensuring variety (no exact duplicates)
-  const team = pickN(pool, teamSize);
+  // Late game: 30% chance to generate a full synergy team (3 same species)
+  let team;
+  if (progress >= 0.7 && teamSize === 3 && Math.random() < 0.3) {
+    const speciesWithThree = [...new Set(pool.map(m => m.species))].filter(sp => pool.filter(m => m.species === sp).length >= 3);
+    if (speciesWithThree.length > 0) {
+      const sp = pick(speciesWithThree);
+      team = pickN(pool.filter(m => m.species === sp), 3);
+    } else team = pickN(pool, teamSize);
+  } else {
+    team = pickN(pool, teamSize);
+  }
 
   // Level scaling: base level increases per round with some variance
   const baseLvl = 2 + round * 2;
@@ -298,7 +295,7 @@ function generateTournamentBracket() {
 
 // Generate a freeplay opponent (scales infinitely)
 function generateFreeplayOpponent(battleNum) {
-  const progress = Math.min(1, battleNum / 8); // caps at "max difficulty" by battle 8
+  const progress = Math.min(1, battleNum / 8);
   const prefixes = progress < 0.3 ? TRAINER_PREFIX_EASY : progress < 0.6 ? TRAINER_PREFIX_MID : TRAINER_PREFIX_HARD;
   const trainer = `${pick(prefixes)} ${pick(TRAINER_FIRST)}`;
   const title = pick(TRAINER_TITLE);
@@ -309,7 +306,17 @@ function generateFreeplayOpponent(battleNum) {
   else if (progress < 0.6) pool = ALL_MONSTERS_LIST.filter(m => m.tier === "common" || m.tier === "rare");
   else pool = ALL_MONSTERS_LIST;
 
-  const team = pickN(pool, teamSize);
+  // Late game: 30% chance for synergy trio (3 same species)
+  let team;
+  if (progress >= 0.6 && teamSize === 3 && Math.random() < 0.3) {
+    const speciesWithThree = [...new Set(pool.map(m => m.species))].filter(sp => pool.filter(m => m.species === sp).length >= 3);
+    if (speciesWithThree.length > 0) {
+      const sp = pick(speciesWithThree);
+      team = pickN(pool.filter(m => m.species === sp), 3);
+    } else team = pickN(pool, teamSize);
+  } else {
+    team = pickN(pool, teamSize);
+  }
   const baseLvl = 3 + battleNum * 1.5;
   const monsters = team.map((m, i) => ({ ...m, level: Math.max(1, Math.floor(baseLvl + randInt(-1, 2) - i)) }));
 
@@ -608,6 +615,84 @@ function PartnerRewardScreen({ onChoose }) {
   return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, #0a0a1a 0%, #1a0a2e 40%, #2d1b4e 70%, #0a0a1a 100%)", fontFamily: "'Cinzel', serif", color: "#fff", padding: 20, textAlign: "center" }}><div style={{ fontSize: 42, marginBottom: 8 }}>🏆</div><h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: 3, marginBottom: 6, background: "linear-gradient(135deg, #f1c40f, #e67e22)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Champion!</h2><p style={{ fontSize: 12, color: "#f1c40f", marginBottom: 20, letterSpacing: 2 }}>Choose your first partner</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginBottom: 20 }}>{COMMON_PARTNERS.map((m, i) => { const el = ELEMENTS[m.element]; const v = rev > i; const s = sel?.id === m.id; return <div key={m.id} onClick={() => v && setSel(m)} style={{ width: 120, padding: 10, borderRadius: 10, cursor: v ? "pointer" : "default", background: s ? `linear-gradient(135deg, ${el.color}33, ${el.color}55)` : "rgba(255,255,255,0.03)", border: `2px solid ${s ? el.color : "rgba(255,255,255,0.08)"}`, transition: "all 0.4s", opacity: v ? 1 : 0, transform: v ? "scale(1)" : "scale(0.7)", position: "relative" }}>{s && <div style={{ position: "absolute", top: -7, left: "50%", transform: "translateX(-50%)", background: el.color, color: "#fff", fontSize: 7, padding: "1px 6px", borderRadius: 5, fontFamily: "'Cinzel', serif" }}>CHOSEN</div>}<div style={{ fontSize: 32, marginBottom: 3 }}>{m.emoji}</div><div style={{ fontSize: 11, fontWeight: 700 }}>{m.name}</div><div style={{ fontSize: 7, color: el.color }}>{el.icon} {el.name}</div><div style={{ fontSize: 6, color: "#666", marginTop: 3, fontFamily: "monospace" }}>HP:{m.baseHP} ATK:{m.baseAtk}</div></div>; })}</div>{sel && <button onClick={() => setConf(true)} style={{ background: `linear-gradient(135deg, ${ELEMENTS[sel.element].color}, ${ELEMENTS[sel.element].color}cc)`, color: "#fff", border: "none", padding: "10px 28px", borderRadius: 22, fontSize: 12, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>Bond with {sel.name}</button>}</div>;
 }
 
+function MonsterInspect({ monster, onClose }) {
+  if (!monster) return null;
+  const el = ELEMENTS[monster.element] || { color: "#888", icon: "", name: "?" };
+  const tierC = { common: "#95a5a6", rare: "#9b59b6", mythical: "#f1c40f" };
+  const activeBuffs = monster.buffs ? Object.entries(monster.buffs).filter(([k, v]) => v > 0 && k !== "healCount") : [];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, fontFamily: "'Cinzel', serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "linear-gradient(135deg, #12101a, #1a1028)", borderRadius: 14, border: `2px solid ${el.color}44`, padding: 16, maxWidth: 340, width: "100%", color: "#fff" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 36 }}>{monster.emoji}</span>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 900, letterSpacing: 1 }}>{monster.name}</div>
+              <div style={{ fontSize: 8, color: el.color }}>{el.icon} {el.name} · {monster.species || "?"} · <span style={{ color: tierC[monster.tier] || "#888" }}>{monster.tier}</span></div>
+              {monster.level && <div style={{ fontSize: 7, color: "#888" }}>Level {monster.level} · Zone: {monster.zone}</div>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#aaa", padding: "3px 10px", fontSize: 10, cursor: "pointer" }}>✕</button>
+        </div>
+        {monster.desc && <div style={{ fontSize: 8, color: "#888", fontStyle: "italic", marginBottom: 8, lineHeight: 1.4 }}>{monster.desc}</div>}
+
+        {/* HP Bar */}
+        {monster.hp !== undefined && <div style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#ccc", marginBottom: 2 }}><span>HP</span><span>{monster.hp}/{monster.maxHP}</span></div>
+          <HPBar current={monster.hp} max={monster.maxHP} />
+        </div>}
+
+        {/* Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", marginBottom: 8, padding: "6px 10px", background: "rgba(255,255,255,0.03)", borderRadius: 7, border: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ fontSize: 9 }}><span style={{ color: "#e74c3c" }}>⚔️ ATK:</span> <span style={{ color: "#fff", fontFamily: "monospace" }}>{monster.atk || monster.baseAtk}</span></div>
+          <div style={{ fontSize: 9 }}><span style={{ color: "#3498db" }}>🛡️ DEF:</span> <span style={{ color: "#fff", fontFamily: "monospace" }}>{monster.def || monster.baseDef}</span></div>
+          <div style={{ fontSize: 9 }}><span style={{ color: "#e8a" }}>🎯 ACC:</span> <span style={{ color: "#fff", fontFamily: "monospace" }}>{monster.acc || monster.baseAcc}</span></div>
+          <div style={{ fontSize: 9 }}><span style={{ color: "#2ecc71" }}>💨 SPD:</span> <span style={{ color: "#fff", fontFamily: "monospace" }}>{monster.spd || monster.baseSpd}</span></div>
+          <div style={{ fontSize: 9 }}><span style={{ color: "#5dade2" }}>⚡ FP Gen:</span> <span style={{ color: "#fff", fontFamily: "monospace" }}>{monster.fpGen}</span></div>
+          {monster.hp !== undefined && <div style={{ fontSize: 9 }}><span style={{ color: monster.alive ? "#2ecc71" : "#e74c3c" }}>{monster.alive ? "✓ Alive" : "💀 KO"}</span></div>}
+        </div>
+
+        {/* Active Buffs/Debuffs */}
+        {activeBuffs.length > 0 && <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 8, color: "#f1c40f", letterSpacing: 1, marginBottom: 3 }}>ACTIVE EFFECTS</div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {activeBuffs.map(([k, v]) => {
+              const bad = k.includes("Down") || k === "burn" || k === "poison" || k === "stun";
+              return <span key={k} style={{ fontSize: 8, padding: "2px 6px", borderRadius: 5, background: bad ? "rgba(231,76,60,0.2)" : "rgba(46,204,113,0.2)", border: `1px solid ${bad ? "#e74c3c44" : "#2ecc7144"}`, color: bad ? "#e74c3c" : "#2ecc71" }}>{getBuffIcon(k)} {formatBuffName(k)} ({v}t)</span>;
+            })}
+          </div>
+        </div>}
+        {activeBuffs.length === 0 && monster.hp !== undefined && <div style={{ fontSize: 7, color: "#555", marginBottom: 8 }}>No active effects</div>}
+
+        {/* Skills */}
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: 8, color: "#f1c40f", letterSpacing: 1, marginBottom: 3 }}>SKILLS</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {monster.skills.map((sk, i) => {
+              const sel = ELEMENTS[sk.element] || { color: "#888", icon: "" };
+              return <div key={i} style={{ padding: "4px 8px", background: `${sel.color}11`, borderRadius: 6, border: `1px solid ${sel.color}22` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "#fff" }}>{sel.icon} {sk.name}</span>
+                  <span style={{ fontSize: 7, fontFamily: "monospace", color: "#aaa" }}>{sk.power > 0 ? `P:${sk.power}` : "BUFF"} ⚡{sk.fp} 🎯{sk.accuracy || 90}%</span>
+                </div>
+                <div style={{ fontSize: 7, color: "#888" }}>
+                  {sk.desc}{sk.effect ? ` · ${formatBuffName(sk.effect)}` : ""} · {sk.target === "all" ? "AOE" : sk.target === "self" ? "Self" : sk.target === "ally" ? "Ally" : sk.target === "allAlly" ? "All Allies" : sk.target === "team" ? "Team" : "Single"}
+                </div>
+              </div>;
+            })}
+          </div>
+        </div>
+
+        {/* Support */}
+        {monster.support && <div style={{ fontSize: 8, color: "#5dade2", padding: "4px 8px", background: "rgba(93,173,226,0.1)", borderRadius: 6, border: "1px solid rgba(93,173,226,0.15)" }}>
+          🛡️ Support: {monster.support.desc}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
 // ═══ MAIN GAME ═══
 function MythicFossils() {
   const [screen, setScreen] = useState("title");
@@ -630,6 +715,7 @@ function MythicFossils() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialPage, setTutorialPage] = useState(0);
   const [tutorialChecked, setTutorialChecked] = useState(false);
+  const [inspectMonster, setInspectMonster] = useState(null); // monster to show in inspect popup
   const [wins, setWins] = useState(0);
   const [selectedRoster, setSelectedRoster] = useState([]);
   const [filterElement, setFilterElement] = useState("all");
@@ -831,6 +917,8 @@ function MythicFossils() {
     const playerFirst = playerTotalSpd >= enemyTotalSpd; // ties go to player
 
     setEnemyTeam(et); setPlayerFP(diff.playerStartFP); setEnemyFP(diff.enemyStartFP); setTurnNum(1);
+    // Check enemy synergy
+    const enemySyn = detectSynergy(et);
     const spdLog = [
       { text: `⚔️ ${ed.trainer} challenges you!${isJ ? ` [Ch.${journeyChapter + 1} B${journeyBattle + 1}/8]` : ` [${diff.label}]`}`, type: "info" },
       { text: `"${ed.title}"`, type: "info" },
@@ -838,6 +926,10 @@ function MythicFossils() {
       { text: `💨 Speed Check: You ${playerTotalSpd} vs Enemy ${enemyTotalSpd}`, type: "info" },
       { text: playerFirst ? `💨 Your team is faster — you go first!` : `💨 Enemy team is faster — they strike first!`, type: playerFirst ? "heal" : "damage" },
     ];
+    // Log synergy warnings
+    const playerSyn = detectSynergy(team);
+    if (playerSyn) spdLog.push({ text: `🌟 Your ${playerSyn.synergy.name} synergy is active!`, type: "buff" });
+    if (enemySyn) spdLog.push({ text: `⚠️ Enemy has ${enemySyn.synergy.name} synergy — watch out for their ultimate!`, type: "damage" });
     setBattleLog(spdLog);
     setSelectedAction(null); setSelectingTarget(false); setSelectingRotate(false); setSelectingProtect(false); setBattleResult(null); setActionsThisTurn(0);
 
@@ -1002,6 +1094,26 @@ function MythicFossils() {
       if (newAZ && newAZ.hp < newAZ.maxHP * 0.25 && getSZ(cE).some(m => m.hp > m.maxHP * 0.5) && cEFP >= ROTATE_COST && Math.random() < diff.enemyRotateChance) {
         const best = getSZ(cE).reduce((b, m) => !b || m.hp > b.hp ? m : b, null);
         if (best) { cE = cE.map(m => { if (m.zone === "AZ") return { ...m, zone: "SZ" }; if (m === best) return { ...m, zone: "AZ" }; return m; }); cEFP -= ROTATE_COST; addLog(`🔄 Enemy rotated ${best.name} to AZ! (-${ROTATE_COST} FP)`, "fp"); }
+      }
+      // AI: check for synergy ultimate (use once per battle when FP allows, smart AI only)
+      const eSyn = detectSynergy(cE);
+      if (eSyn && diff.enemySmartSkill && cEFP >= eSyn.synergy.ultimate.fp && cP.filter(m => m.alive).length >= 2) {
+        const ult = eSyn.synergy.ultimate;
+        addLog(`🌟 ${eSyn.synergy.emoji} Enemy ${eSyn.synergy.name} ACTIVATED!`, "element");
+        addLog(`💥 ${ult.name}! (-${ult.fp} FP)`, "damage");
+        cEFP -= ult.fp;
+        const hittable = cP.map((m, i) => m.alive && m.zone !== "PZ" ? i : -1).filter(i => i >= 0);
+        const eAZ = getAZ(cE);
+        hittable.forEach(ti => {
+          let d = { ...cP[ti] };
+          const dmg = calcDamage(eAZ, ult, d, cE, cP);
+          d.hp = Math.max(0, d.hp - dmg);
+          if (d.hp <= 0) { d.alive = false; d.zone = "SZ"; }
+          cP[ti] = d;
+          addLog(`${d.name} takes ${dmg} damage!${!d.alive ? " 💀 KO!" : ""}`, "damage");
+        });
+        if (ult.effect === "heal") { const h = Math.floor((eAZ?.atk || 30) * 0.8 + 25); cE = cE.map(m => m.alive ? { ...m, hp: Math.min(m.maxHP, m.hp + h) } : m); addLog(`Enemy team heals ${h} HP!`, "heal"); }
+        cP = autoPromote(cP, addLog);
       }
       // AI attacks
       const maxAct = diff.enemySmartSkill ? 3 : 2; let acts = 0;
@@ -1188,7 +1300,7 @@ function MythicFossils() {
     ]},
     { title: "Species Synergy", icon: "🌟", content: [
       { text: "Each monster belongs to a species family (Drake, Leviathan, Raptor, etc.) with Common, Rare, and Mythical tiers.", color: "#ccc" },
-      { text: "Pick all 3 tiers of ONE species on your team to activate a powerful synergy!", color: "#f1c40f" },
+      { text: "Pick 3 monsters of the SAME species on your team to activate a powerful synergy!", color: "#f1c40f" },
       { text: "Synergy gives a passive team buff (always active) + an Ultimate Move — a guaranteed-hit AOE that devastates all enemies.", color: "#f1c40f" },
     ]},
     { title: "Game Modes", icon: "🗺️", content: [
@@ -1615,7 +1727,7 @@ function MythicFossils() {
             <div style={{ fontSize: 6, color: "#aaa", fontStyle: "italic" }}>{syn.synergy.passive.desc}</div>
           </div>
         )}
-        {!syn && selectedRoster.length === 3 && <div style={{ textAlign: "center", fontSize: 7, color: "#666", marginBottom: 6 }}>No synergy — pick all 3 tiers of one species for an ultimate!</div>}
+        {!syn && selectedRoster.length === 3 && <div style={{ textAlign: "center", fontSize: 7, color: "#666", marginBottom: 6 }}>No synergy — pick 3 of the same species for an ultimate!</div>}
 
         {/* Filter Bar */}
         <div style={{ marginBottom: 6, padding: "6px 8px", background: "rgba(0,0,0,0.2)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.04)" }}>
@@ -1712,7 +1824,7 @@ function MythicFossils() {
           <div style={{ fontSize: 7, color: "#999", lineHeight: 1.5 }}>
             <b style={{ color: "#e74c3c" }}>⚔️AZ</b> attacks & gets hit · <b style={{ color: "#3498db" }}>🛡️SZ</b> buffs AZ & generates FP · <b style={{ color: "#9b59b6" }}>💤PZ</b> safe {PZ_DURATION} turns (⚡{PROTECT_COST})
             <br /><b style={{ color: "#fff" }}>Stats:</b> <span style={{ color: "#e74c3c" }}>ATK</span>→damage · <span style={{ color: "#3498db" }}>DEF</span>→reduction · <span style={{ color: "#e8a" }}>ACC</span>→hit% · <span style={{ color: "#2ecc71" }}>SPD</span>→dodge
-            <br />Pick all 3 tiers of one <b style={{ color: "#f1c40f" }}>species</b> for a synergy ultimate! Multi-action turns — spend FP freely, then End Turn.
+            <br />Pick 3 of one <b style={{ color: "#f1c40f" }}>species</b> for a synergy ultimate! Multi-action turns — spend FP freely, then End Turn.
           </div>
         </div>
         {showChart && <ElementChart onClose={() => setShowChart(false)} />}
@@ -1745,9 +1857,12 @@ function MythicFossils() {
       {/* Enemy */}
       <TeamFPBar current={enemyFP} max={MAX_FP} gen={Math.floor(calcTeamFPGen(enemyTeam) * di.enemyFPGenMult)} />
       <div>
-        <div style={{ fontSize: 7, color: "#e74c3c", letterSpacing: 2, marginBottom: 3, paddingLeft: 3 }}>OPPONENT</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 3, paddingRight: 3, marginBottom: 3 }}>
+          <span style={{ fontSize: 7, color: "#e74c3c", letterSpacing: 2 }}>OPPONENT</span>
+          {(() => { const es = detectSynergy(enemyTeam); return es ? <span style={{ fontSize: 6, color: "#f1c40f", padding: "1px 5px", background: "rgba(241,196,15,0.1)", borderRadius: 4, border: "1px solid rgba(241,196,15,0.2)" }}>{es.synergy.emoji} {es.species}</span> : null; })()}
+        </div>
         <div style={{ display: "flex", gap: 5, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap" }}>
-          {sortTeam(enemyTeam).map((m, i) => { const ri = enemyTeam.indexOf(m); return <div key={ri} onClick={() => selectingTarget && m.alive && m.zone !== "PZ" && handleTargetSelect(ri)} style={{ cursor: selectingTarget && m.alive && m.zone !== "PZ" ? "pointer" : "default", outline: selectingTarget && m.alive && m.zone !== "PZ" ? "2px dashed #e74c3c" : "none", outlineOffset: 2, borderRadius: 12 }}><ZoneSlot monster={m} zone={m.zone} isEnemy shaking={shakeId === `enemy-${ri}`} /></div>; })}
+          {sortTeam(enemyTeam).map((m, i) => { const ri = enemyTeam.indexOf(m); return <div key={ri} onClick={() => { if (selectingTarget && m.alive && m.zone !== "PZ") handleTargetSelect(ri); else if (!selectingTarget && !selectingRotate && !selectingProtect && !animating) setInspectMonster(m); }} style={{ cursor: "pointer", outline: selectingTarget && m.alive && m.zone !== "PZ" ? "2px dashed #e74c3c" : "none", outlineOffset: 2, borderRadius: 12 }}><ZoneSlot monster={m} zone={m.zone} isEnemy shaking={shakeId === `enemy-${ri}`} /></div>; })}
         </div>
       </div>
 
@@ -1756,10 +1871,13 @@ function MythicFossils() {
       {/* Player */}
       <TeamFPBar current={playerFP} max={MAX_FP} gen={playerFPGen} />
       <div>
-        <div style={{ fontSize: 7, color: "#2ecc71", letterSpacing: 2, marginBottom: 3, paddingLeft: 3 }}>YOUR TEAM</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 3, paddingRight: 3, marginBottom: 3 }}>
+          <span style={{ fontSize: 7, color: "#2ecc71", letterSpacing: 2 }}>YOUR TEAM</span>
+          {(() => { const ps = detectSynergy(playerTeam); return ps ? <span style={{ fontSize: 6, color: "#f1c40f", padding: "1px 5px", background: "rgba(241,196,15,0.1)", borderRadius: 4, border: "1px solid rgba(241,196,15,0.2)" }}>{ps.synergy.emoji} {ps.species}</span> : null; })()}
+        </div>
         <div style={{ display: "flex", gap: 5, justifyContent: "center", alignItems: "flex-start", flexWrap: "wrap" }}>
           {sortTeam(playerTeam).map((m, i) => { const ri = playerTeam.indexOf(m); return <div key={ri}><ZoneSlot monster={m} zone={m.zone} shaking={shakeId === `player-${ri}`}
-            onClick={selectingRotate && m.alive && m.zone === "SZ" ? () => handleRotate(ri) : selectingProtect && m.alive && m.zone !== "PZ" ? () => handleProtect(ri) : undefined}
+            onClick={selectingRotate && m.alive && m.zone === "SZ" ? () => handleRotate(ri) : selectingProtect && m.alive && m.zone !== "PZ" ? () => handleProtect(ri) : !selectingRotate && !selectingProtect && !selectingTarget && !animating ? () => setInspectMonster(m) : undefined}
             highlight={(selectingRotate && m.alive && m.zone === "SZ") || (selectingProtect && m.alive && m.zone !== "PZ")} /></div>; })}
         </div>
       </div>
@@ -1801,12 +1919,13 @@ function MythicFossils() {
       {battleResult && <div style={{ textAlign: "center", padding: 14, background: battleResult === "win" ? "linear-gradient(135deg, rgba(46,204,113,0.15), rgba(241,196,15,0.15))" : "linear-gradient(135deg, rgba(231,76,60,0.15), rgba(142,68,173,0.15))", borderRadius: 9, border: `1px solid ${battleResult === "win" ? "#2ecc7133" : "#e74c3c33"}` }}><div style={{ fontSize: 26, marginBottom: 5 }}>{battleResult === "win" ? "🏆" : "💀"}</div><div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 3, color: battleResult === "win" ? "#f1c40f" : "#e74c3c", marginBottom: 4 }}>{battleResult === "win" ? "VICTORY!" : "DEFEATED"}</div>{gameMode === "tournament" && battleResult === "win" && currentBattle >= bracket.length - 1 && <div style={{ fontSize: 9, color: "#f1c40f", marginBottom: 6 }}>🏆 Tournament Complete!</div>}{gameMode === "journey" && battleResult === "win" && journeyBattle >= 7 && <div style={{ fontSize: 9, color: "#9b59b6", marginBottom: 6 }}>✨ Mythical fossil excavated!</div>}{gameMode === "journey" && battleResult === "win" && journeyBattle < 7 && <div style={{ fontSize: 8, color: "#aaa", marginBottom: 4 }}>Battle {journeyBattle + 1}/8 complete</div>}<button onClick={handleBattleEnd} style={{ background: "linear-gradient(135deg, #e74c3c, #c0392b)", color: "#fff", border: "none", padding: "8px 24px", borderRadius: 16, fontSize: 11, fontFamily: "'Cinzel', serif", fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>{gameMode === "journey" ? (battleResult === "win" ? (journeyBattle >= 7 ? "🎁 Claim Fossil" : `Battle ${journeyBattle + 2}/8 →`) : "Retry") : gameMode === "tournament" ? (battleResult === "win" ? (currentBattle >= bracket.length - 1 ? "🎁 Claim" : "Next →") : "Retry") : (battleResult === "win" ? "Next →" : "Retry")}</button></div>}
       <BattleLog log={battleLog} />
       {showChart && <ElementChart onClose={() => setShowChart(false)} />}
+      {inspectMonster && <MonsterInspect monster={inspectMonster} onClose={() => setInspectMonster(null)} />}
     </div>
   );
 }
 
-// Mount the app
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MythicFossils));
   </script>
 </body>
 </html>
+
