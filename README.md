@@ -1,10 +1,10 @@
-# 🐉 Mythic Fossils
+# 🐉 MYTHIC FOSSILS
 
 A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and collect mythical creatures. [WORK IN PROGRESS] [JUST A SYSTEM TEST NOT ACTUAL GAMEPLAY]
 
 ## 🎮 [Play Now](https://voidzz-exe.github.io/mythic-fossils/)
 
-## Features
+## KEY DETAILS
 
 - **35 monsters** across 7 species families with 6 elements
 - **Zone positioning** — Attack, Support, and Protection zones
@@ -18,7 +18,7 @@ A turn-based battle game inspired by Fossil Fighters. Build teams of 3 and colle
 - **Tutorial** — 8-page interactive guide for new players
 - **Element chart** — in-battle reference
 
-## In Detail ^
+## IN DETAIL^
 build strategic teams of 3, and battle through tournaments and a full journey mode to collect all 7 mythical creatures.
 
 - **Zone Positioning** — Attack Zone (front fighter), Support Zone (passive buffs + FP gen), Protection Zone (invulnerable for 2 turns)
@@ -28,7 +28,7 @@ build strategic teams of 3, and battle through tournaments and a full journey mo
 - **6 Elements** — Fire → Earth → Wind → Water cycle + Shadow ↔ Light mutual weakness
 
 
-### Status Effects & Buffs
+### STATUS EFFECTS & BUFFS
 - 🔥 **Burn** — 8% max HP damage/turn (2 turns)
 - 🟢 **Poison** — 6% max HP damage/turn (3 turns)
 - ⚡ **Stun** — Skip entire turn (1 turn)
@@ -48,12 +48,12 @@ build strategic teams of 3, and battle through tournaments and a full journey mo
 | 🐛 Insect | Earth, Fire, Wind, Shadow, Light | FP gen/debuffs |
 
 
-### Species Synergy System
+### SPECIES SYNERGY SYSTEM
 Pick all 3 tiers (Common + Rare + Mythical) of one species to unlock:
 - **Passive team buff** (always active)
 - **Ultimate Move** — 100% guaranteed hit AOE with massive power
 
-### Playable Modes to get a Feel
+### MODES TO GET A FEEL
 These modes will allow you to sink your teeth into the system
 
 **🏆 Tournament** — 4-round randomized bracket with chosen difficulty. Win all 4 to earn a partner monster.
